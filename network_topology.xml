@@ -1,0 +1,11 @@
+<Topology_Root>
+  <Controller unique_id="0" name="master">
+    <Switch unique_id="1" name="sw0">
+      <End_Station unique_id="2" name="ES1"/>
+      <End_Station unique_id="3" name="ES3"/>
+      <Switch unique_id="4" name="sw1">
+        <End_Station unique_id="5" name="ES2"/>
+      </Switch>
+    </Switch>
+  </Controller>
+</Topology_Root>
