@@ -1,9 +1,9 @@
 """
-Command line interface to generate the network topology.xml
-    by stating everything manually
+Command line interface to generate the network topology.xml by stating everything manually
+
 No visualisation
 """
-# TODO : fix maximum node count - can be overran, doesnt fully account for future nodes
+# TODO : fix maximum node count - can be overran, doesnt fully account for future nodes on switches
 
 
 from lxml import etree
