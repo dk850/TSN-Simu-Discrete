@@ -84,14 +84,15 @@ def build_switch(root_node):
     global g_node_count  # to show this is a dynamic variable
 
     # END STATIONS
-    es_count = get_int_descision("How many end stations are connected to this switch?", 1, (MAX_NODES-g_node_count))
+    es_count = get_int_descision("How many end stations are connected to this switch (id: " + \
+                                 str(root_node.get("unique_id"))+")?", 1, (MAX_NODES-g_node_count))
 
     # we need to loop es_count amount of times to add that many end stations
     for es in range(1, int(es_count)+1):  # 1-based
 
         # check if we are in naming mode
         if node_name_mode:
-            es_name = get_alphanumeric_descision("Input end station"+str(es)+" name:")
+            es_name = get_alphanumeric_descision("Input end station "+str(es)+" name:")
         else:
             es_name = "unnamed"
 
@@ -103,7 +104,8 @@ def build_switch(root_node):
 
 
     # CHILD SWITCHES
-    sw_count = get_int_descision("How many switches connected from this switch?", 0, (MAX_NODES-g_node_count))
+    sw_count = get_int_descision("How many switches connected from this switch (id: " + \
+                                 str(root_node.get("unique_id"))+")?", 0, (MAX_NODES-g_node_count))
 
     # loop over all possible child switches and add their children (if 0 this will not be executed)
     for sw in range(1, int(sw_count)+1):  # 1-based
