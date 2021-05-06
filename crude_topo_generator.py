@@ -1,16 +1,19 @@
 """
-Command line interface to generate the network topology.xml by stating everything manually
+Command line interface to generate the network topology.xml by stating everything manually over cli
 
 No visualisation
 """
 # TODO : fix maximum node count - can be overran, doesnt fully account for future nodes on switches
 
-
 from lxml import etree
 
 
 
-### HELPER FUNCTIONS
+
+##################################################
+################ HELPER FUNCTIONS ################
+##################################################
+
 # Helper function to ask the user a question and get a YES (True) or NO (False) answer
 def get_YesNo_descision(prompt_question):
     final_descision = "loop"
@@ -78,14 +81,20 @@ def get_alphanumeric_descision(prompt_question, alpha_only=False):
 
 
 
-### MAIN FUNCTIONS
+
+##################################################
+################# MAIN FUNCTIONS #################
+##################################################
+
 # function to define any child end stations, switches and their names (if applicable)
 def build_switch(root_node):
     global g_node_count  # to show this is a dynamic variable
 
-    # END STATIONS
+
+    ### END STATIONS
     es_count = get_int_descision("How many end stations are connected to this switch (id: " + \
                                  str(root_node.get("unique_id"))+")?", 1, (MAX_NODES-g_node_count))
+
 
     # we need to loop es_count amount of times to add that many end stations
     for es in range(1, int(es_count)+1):  # 1-based
@@ -103,16 +112,18 @@ def build_switch(root_node):
         end_station.set("name", es_name)
 
 
-    # CHILD SWITCHES
+
+    ### CHILD SWITCHES
     sw_count = get_int_descision("How many switches connected from this switch (id: " + \
                                  str(root_node.get("unique_id"))+")?", 0, (MAX_NODES-g_node_count))
+
 
     # loop over all possible child switches and add their children (if 0 this will not be executed)
     for sw in range(1, int(sw_count)+1):  # 1-based
 
         # check if we are in naming mode
         if node_name_mode:
-            sw_name = get_alphanumeric_descision("Input child switch"+str(sw)+" name:")
+            sw_name = get_alphanumeric_descision("Input child switch "+str(sw)+" name:")
         else:
             sw_name = "unnamed"
 
@@ -126,7 +137,11 @@ def build_switch(root_node):
 
 
 
-### USER SETTINGS
+
+##################################################
+################# USER  SETTINGS #################
+##################################################
+
 # must be more than 3 nodes due to there needing to be at least 1 of {controller, switch, end station}
 MAX_NODES = int(get_int_descision("What is the maximum number of nodes?", 3, 100))
 
@@ -135,7 +150,11 @@ node_name_mode = get_YesNo_descision("Do you wish to name your nodes?")
 
 
 
-### DEFINE CONTROLLER
+
+##################################################
+############### DEFINE  CONTROLLER ###############
+##################################################
+
 controller_id = 0  # controller will always be ID 0
 
 # check if we want to name the controller
@@ -144,6 +163,7 @@ if node_name_mode:
     print("Controller name set to:", "\""+controller_name+"\"", "successfully")
 else:
     controller_name = "unnamed"
+
 
 # set up the XML
 output_xml = etree.Element("Topology_Root")  # default root node
@@ -155,11 +175,16 @@ output_xml[0].set("name", str(controller_name))
 
 
 
-### DEFINE ROOT SWITCH(ES)
+
+##################################################
+############# DEFINE ROOT SWITCH(ES) #############
+##################################################
+
 # count must be more than 1 (must have at least 1 switch)
 # and less than MAX_NODES-2 (as we already have 1 controller, and need at least 1 end station)
 root_switches_count = get_int_descision("Input the amount of switches connected directly to the controller:", 1, MAX_NODES-2)
 print("Continuing with", str(root_switches_count), "root switches")
+
 
 # create child switch(es) under the controller node (0) in the root of the xml
 # we cant use build_switch(controller) here as end stations cant be connected directly to the controller????????
@@ -180,14 +205,22 @@ g_node_count = int(root_switches_count) + 1  # global variable of total number o
 
 
 
-### DEFINE CHILD SWITCHES AND END STATIONS
+
+##################################################
+##### DEFINE CHILD SWITCHES AND END STATIONS #####
+##################################################
+
 # finaly, loop over all these root switches to create their children
 for rs in range(int(root_switches_count)):  # 0-based
     build_switch(output_xml[0][rs])
 
 
 
-### OUTPUT
+
+##################################################
+##################### OUTPUT #####################
+##################################################
+
 # print to console nicely
 print("\n\nFINAL NODE XML:\n"+etree.tostring(output_xml, pretty_print=True).decode())
 
