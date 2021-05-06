@@ -5,6 +5,10 @@ No visualisation
 """
 # TODO : fix maximum node count - can be overran, doesnt fully account for future nodes on switches
 
+##################################################
+##################### IMPORT #####################
+##################################################
+
 from lxml import etree
 
 
