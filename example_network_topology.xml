@@ -1,10 +1,26 @@
 <Topology_Root>
   <Controller unique_id="0" name="unnamed">
-    <Switch unique_id="1" name="unnamed">
-      <End_Station unique_id="3" name="unnamed"/>
+    <Switch unique_id="100" name="unnamed">
+      <End_Station unique_id="1" name="unnamed"/>
+      <Switch unique_id="300" name="unnamed">
+        <End_Station unique_id="2" name="unnamed"/>
+          <Switch unique_id="900" name="unnamed">
+            <End_Station unique_id="5" name="unnamed"/>
+            <End_Station unique_id="6" name="unnamed"/>
+            <Switch unique_id="1000" name="unnamed">
+              <End_Station unique_id="50" name="unnamed"/>
+              <End_Station unique_id="60" name="unnamed"/>
+            </Switch>
+          </Switch>
+      </Switch>
     </Switch>
-    <Switch unique_id="2" name="unnamed">
+    <Switch unique_id="200" name="unnamed">
+      <End_Station unique_id="3" name="unnamed"/>
       <End_Station unique_id="4" name="unnamed"/>
+      <End_Station unique_id="9" name="unnamed"/>
+      <Switch unique_id="400" name="unnamed">
+        <End_Station unique_id="12" name="unnamed"/>
+      </Switch>
     </Switch>
   </Controller>
 </Topology_Root>
