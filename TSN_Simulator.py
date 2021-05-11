@@ -1,8 +1,7 @@
 """
 Main TSN Simulator
 
-Specify file locations for neccesay files (Network Topo, Routing Table, Traffic Definition, GCL, Queue definition)
-
+Specify file locations for neccesay files (Network Topo, Traffic Definition, GCL, Queue definition)
 """
 
 ##################################################
@@ -23,7 +22,8 @@ e_queue_type_names = ["ST", "Emergency", "Sporadic_Hard", "Sporadic_Soft", "BE"]
 
 
 g_node_id_dict = {}
-g_offline_GCL = {}
+g_offline_GCL = {}  # key is timestamp, value is the gate state at that timestamp.
+# should only change gate state if we have a key for that timestamp, else leave it as previous value
 
 
 
@@ -242,7 +242,7 @@ class Queue:
 
         # dont forget initial GCL is global
         global g_offline_GCL
-        self.offline_GCL = g_offline_GCL
+        self.offline_GCL = g_offline_GCL  # does this even need to be stored here? Can just use global one?
         self.active_GCL = self.offline_GCL  # initially. Can be changed with modify_GCL()
 
 
@@ -266,6 +266,8 @@ class Queue:
 
     def to_string(self):
         out_str = "QUEUE DEFINITION:"
+
+        # print queue types
         out_str += "\nST_Count: "+str(self.ST_count)
         out_str += "\nST_schedule: "+str(self.ST_schedule)
         out_str += "\nemergency_count: "+str(self.emergency_count)
@@ -276,8 +278,21 @@ class Queue:
         out_str += "\nsporadic_soft_schedule: "+str(self.sporadic_soft_schedule)
         out_str += "\nBE_count: "+str(self.BE_count)
         out_str += "\nBE_schedule: "+str(self.BE_schedule)
-        out_str += "\nOffline_GCL: "+str(self.offline_GCL)
-        out_str += "\nActive_GCL: "+str(self.active_GCL)
+
+        # print offline_GCL
+        out_str += "\nOffline_GCL:\n"
+        for key in self.offline_GCL:
+            out_str += str(key)+": "+str(self.offline_GCL[key])+"\n"  # if I end up using global just change this to global? 
+
+        # print active_GCL if it is different to offline_GCL
+        if self.offline_GCL == self.active_GCL:
+            out_str += "Active_GCL is identical to offline_GCL"
+        else:
+            out_str += "Active_GCL:\n"
+            for key in self.active_GCL:
+                out_str += str(key)+": "+str(self.active_GCL[key])+"\n"
+
+        # return string
         return out_str
 
 
@@ -651,6 +666,78 @@ def parse_queue_definition(f_queue_def, debug):
         g_node_id_dict[int(switch.get("unique_id"))].set_queue_def(queue_def)
 
 
+    return 1  # done
+
+
+
+# function to error check and parse the GCL
+def parse_GCL(f_GCL):
+
+    global g_offline_GCL
+
+    # open gcl file
+    f_GCL = Path(f_GCL)  # convert string filename to actual file object
+    with f_GCL.open() as f:
+        f_lines = f.read().splitlines()  # put entire file into an ordered list
+
+        if( (f_lines[0][0:3] != "T0 ") and (f_lines[0][0:3] != "T0-T") ):  # first line should be T0
+            print("ERROR: First line in GCL must start at timestamp T0")
+            return -1
+        if( (f_lines[-1][-7:] != " REPEAT") and (f_lines[-1][-7:] != " repeat") ):  # last line should contain REPEAT statement
+            print("ERROR: Final line of GCL should be REPEAT")
+            return -1
+
+
+        # check each line for errors
+        current_timestamp = -1  # initialise this and use it to make sure the list is sequential and we account for every range
+        for line in f_lines:
+
+            if line[0] != "T":  # all lines should start with T
+                print("ERROR: Every line in the GCL must start with a T")
+                return -1
+            if "-" in line:  # groups should have both timestamps starting with T
+                if( (line.split('-')[0][0] != "T") or (line.split('-')[1][0] != "T") ):
+                    print("ERROR: In group timestamp", "\""+str(line.split(' ')[0])+"\"", "both sides should start with \"T\"")
+                    return -1
+
+
+            # if not the final line
+            if line != f_lines[-1]:
+                for index in range(1, 9):  # check final 8 positions for 0's and 1's
+                    if( (line[-index] != "1") and (line[-index] != "0") ):
+                        print("ERROR: GCL string must be made up of 0's and 1's at line", "\""+str(line)+"\"")
+                        return -1
+                if line[-9] != " ":  # make sure timestamps are seperated from the gate positions by spaces " "
+                    print("ERROR: Timestamps must be followed by a space")
+                    return -1
+
+
+            # final error check (for sequential timestamps) AND add data to global GCL list here
+            timing = line.split(' ')[0]  # split on space, LHS is timing data, RHS is gate state
+            if "-" in timing:  # if we are dealing with a group of timestamps
+                if current_timestamp+1 == int(timing.split('-')[0][1:]):  # if current timestamp +1 is the first value in the group in the GCL
+                    # then this is sequential so add the range to the timestamp
+                    group_size = int(timing.split('-')[1][1:]) - int(timing.split('-')[0][1:])  # get the size of the range
+                    g_offline_GCL[current_timestamp+1] = line.split(' ')[1]  # add gate state to dict for start timestamp
+                    current_timestamp += group_size+1
+                else:
+                    print("ERROR: Timestamp value at line", "\""+str(line)+"\"", "is not sequential")
+                    return -1
+
+            else:  # else it is a single timestamp
+                if int(timing[1:]) == current_timestamp+1:  # if current timestamp+1 is the next timestamp in the GCL
+                    # then this is sequential so increment the timestamp by 1 timestamp
+                    current_timestamp += 1
+                    g_offline_GCL[current_timestamp] = line.split(' ')[1]  # add gate state to dictionary for this timestamp
+                else:
+                    print("ERROR: Timestamp value at line", "\""+str(line)+"\"", "is not sequential")
+                    return -1
+
+
+    return 1
+
+
+
 
 ##################################################
 ######## GET INPUT FILES OR GENERATE THEM ########
@@ -661,10 +748,12 @@ def parse_queue_definition(f_queue_def, debug):
 # specify file paths and names
 network_topo_file     = "example_network_topology.xml"
 queue_definition_file = "example_queue_definition.xml"
+GCL_file              = "example_gcl.txt"
 
 
 
 ### Parse given files
+# TODO? : make this into a function to make this more modular?
 # network topo
 f = Path(network_topo_file)
 if f.is_file():
@@ -690,14 +779,23 @@ else:
     print("ERROR: Network topology file not found:", "\""+network_topo_file+"\"")
     exit()
 
+
 # PARSE GCL HERE TO GET GLOBAL OFFLINE GCL BEFORE INITIALISING QUEUE OBJECTS
+f = Path(GCL_file)
+if f.is_file():
+    if parse_GCL(GCL_file) == -1:
+        print("ERROR: In file:", "\""+GCL_file+"\"")
+        exit()
+    else:
+        print("Successfully parsed GCL file:", "\""+GCL_file+"\"")
+else:
+    print("ERROR: GCL not found:", "\""+GCL_file+"\"")
+
 
 # parse queue definition from its xml file
 f = Path(queue_definition_file)
 if f.is_file():
-    queue_parse_result = parse_queue_definition(queue_definition_file, 0)  # func(file, debug)
-
-    if queue_parse_result == -1:
+    if parse_queue_definition(queue_definition_file, 0) == -1:
         print("ERROR: In file:", "\""+queue_definition_file+"\"")
         exit()
     else:
