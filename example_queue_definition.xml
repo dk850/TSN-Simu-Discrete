@@ -1,0 +1,65 @@
+<Queue_Definition_Root>
+    <Switch unique_id="0">
+        <Queues>
+            <ST count="3" />
+            <Emergency count="1" schedule="FIFO" />
+            <Sporadic_Hard count="1" schedule="FIFO" />
+            <Sporadic_Soft count="1" schedule="FIFO" />
+            <BE count="1" schedule="FIFO" />
+        </Queues>
+    </Switch>
+    <Switch unique_id="100">
+        <Queues>
+            <ST count="3" />
+            <Emergency count="1" schedule="FIFO" />
+            <Sporadic_Hard count="1" schedule="FIFO" />
+            <Sporadic_Soft count="1" schedule="FIFO" />
+            <BE count="1" schedule="FIFO" />
+        </Queues>
+    </Switch>
+    <Switch unique_id="200">
+        <Queues>
+            <ST count="3" schedule="FIFO" />
+            <Emergency count="2" schedule="FIFO" />
+            <Sporadic_Hard count="1" schedule="FIFO" />
+            <Sporadic_Soft count="1" schedule="FIFO" />
+            <BE count="1" schedule="FIFO" />
+        </Queues>
+    </Switch>
+    <Switch unique_id="300">
+        <Queues>
+            <ST count="1" schedule="FIFO" />
+            <Emergency count="2" schedule="FIFO" />
+            <Sporadic_Hard count="1" schedule="FIFO" />
+            <Sporadic_Soft count="1" schedule="FIFO" />
+            <BE count="1" schedule="FIFO" />
+        </Queues>
+    </Switch>
+    <Switch unique_id="400">
+        <Queues>
+            <ST count="2" schedule="FIFO" />
+            <Emergency count="2" schedule="FIFO" />
+            <Sporadic_Hard count="2" schedule="FIFO" />
+            <Sporadic_Soft count="1" schedule="FIFO" />
+            <BE count="1" schedule="FIFO" />
+        </Queues>
+    </Switch>
+    <Switch unique_id="900">
+        <Queues>
+            <ST count="1" schedule="FIFO" />
+            <Emergency count="1" schedule="FIFO" />
+            <Sporadic_Hard count="1" schedule="FIFO" />
+            <Sporadic_Soft count="3" schedule="FIFO" />
+            <BE count="1" schedule="FIFO" />
+        </Queues>
+    </Switch>
+    <Switch unique_id="1000">
+        <Queues>
+            <ST count="3" schedule="FIFO" />
+            <Emergency count="2" schedule="FIFO" />
+            <Sporadic_Hard count="1" schedule="FIFO" />
+            <Sporadic_Soft count="1" schedule="FIFO" />
+            <BE count="1" schedule="FIFO" />
+        </Queues>
+    </Switch>
+</Queue_Definition_Root>

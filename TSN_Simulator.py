@@ -18,9 +18,12 @@ MAX_NODE_COUNT = 100
 MAX_TRAFFIC_COUNT = 1000
 
 e_es_types = ["sensor", "control"]  # possible end station types
-e_queue_types = ["FIFO"]  # possible queue types
+e_queue_schedules = ["FIFO"]  # possible queue schedules
+e_queue_type_names = ["ST", "Emergency", "Sporadic_Hard", "Sporadic_Soft", "BE"]  # possible queue types
+
 
 g_node_id_dict = {}
+g_offline_GCL = {}
 
 
 
@@ -81,7 +84,7 @@ class Switch(Node):
         self.packets_transmitted = 0
         self.queue_delay = 0.0
         self.local_routing_table = -1  # to be set
-        self.queue = -1  # to be set
+        self.queue_definition = -1  # to be set
 
         # TODO : queue_def is parsed outside of this object and is of type queue, each switch can be different
 
@@ -100,7 +103,7 @@ class Switch(Node):
 
     # setters
     def set_queue_def(self, queue_def):
-        self.queue = queue_def
+        self.queue_definition = queue_def
 
 
     def set_local_routing_table(self, routing_table_def):
@@ -220,25 +223,27 @@ class Best_Effort(NonST):
 
 # queue class (should be present in each switch)
 class Queue:
-    def __init__(self, ST_count, emergency_count, sporadic_count, nonST_count, BE_count, offline_GCL, \
-                 ST_type=e_queue_types[0], emergency_type=e_queue_types[0], sporadic_type=e_queue_types[0], \
-                 nonST_type=e_queue_types[0], BE_type=e_queue_types[0]):
+    def __init__(self, ST_count, emergency_count, sporadic_hard_count, sporadic_soft_count, BE_count, \
+                 ST_schedule=e_queue_schedules[0], emergency_schedule=e_queue_schedules[0], \
+                 sporadic_hard_schedule=e_queue_schedules[0], sporadic_soft_schedule=e_queue_schedules[0], \
+                 BE_schedule=e_queue_schedules[0]):
 
-        # setup queues and their type
+        # setup queues and their schedule
         self.ST_count = ST_count
-        self.ST_type = ST_type
+        self.ST_schedule = ST_schedule
         self.emergency_count = emergency_count
-        self.emergency_type = emergency_type
-        self.sporadic_count = sporadic_count
-        self.sporadic_type = sporadic_type
-        self.nonST_count = nonST_count
-        self.nonST_type = nonST_type
+        self.emergency_schedule = emergency_schedule
+        self.sporadic_hard_count = sporadic_hard_count
+        self.sporadic_hard_schedule = sporadic_hard_schedule
+        self.sporadic_soft_count = sporadic_soft_count
+        self.sporadic_soft_schedule = sporadic_soft_schedule
         self.BE_count = BE_count
-        self.BE_type = BE_type
+        self.BE_schedule = BE_schedule
 
-        # setup GCL details
-        self.active_GCL = offline_GCL
-        self.offline_GCL = offline_GCL
+        # dont forget initial GCL is global
+        global g_offline_GCL
+        self.offline_GCL = g_offline_GCL
+        self.active_GCL = self.offline_GCL  # initially. Can be changed with modify_GCL()
 
 
     # changes the active GCL in some way
@@ -259,6 +264,23 @@ class Queue:
         pass
 
 
+    def to_string(self):
+        out_str = "QUEUE DEFINITION:"
+        out_str += "\nST_Count: "+str(self.ST_count)
+        out_str += "\nST_schedule: "+str(self.ST_schedule)
+        out_str += "\nemergency_count: "+str(self.emergency_count)
+        out_str += "\nemergency_schedule: "+str(self.emergency_schedule)
+        out_str += "\nsporadic_hard_count: "+str(self.sporadic_hard_count)
+        out_str += "\nsporadic_hard_schedule: "+str(self.sporadic_hard_schedule)
+        out_str += "\nsporadic_soft_count: "+str(self.sporadic_soft_count)
+        out_str += "\nsporadic_soft_schedule: "+str(self.sporadic_soft_schedule)
+        out_str += "\nBE_count: "+str(self.BE_count)
+        out_str += "\nBE_schedule: "+str(self.BE_schedule)
+        out_str += "\nOffline_GCL: "+str(self.offline_GCL)
+        out_str += "\nActive_GCL: "+str(self.active_GCL)
+        return out_str
+
+
 
 
 ##################################################
@@ -276,16 +298,16 @@ def error_check_switch(switch):
 
 
     # check the switch itself for errors
-    if(len(switch.keys()) != 2):  # switch must only have 2 attributes called "name" and "unique_id"
+    if len(switch.keys()) != 2:  # switch must only have 2 attributes called "name" and "unique_id"
         print("ERROR: A switch has too many attributes")
         return -1
     if( ("unique_id" not in switch.keys()) or ("name" not in switch.keys()) ):
         print("ERROR: Invalid switch attribute names")
         return -1
-    if(int(switch.get("unique_id")) in g_node_id_dict):  # make sure each ID is unique
+    if int(switch.get("unique_id")) in g_node_id_dict:  # make sure each ID is unique
         print("ERROR: Duplicate ID found (ID:", switch.get("unique_id")+")")
         return -1
-    if(child_nodes_count < 1):  # must be at least 1 other node connected to a switch
+    if child_nodes_count < 1:  # must be at least 1 other node connected to a switch
         print("ERROR: There must be at least 1 end station connected to switch (ID:", switch.get("unique_id")+")")
         return -1
 
@@ -297,26 +319,26 @@ def error_check_switch(switch):
             return -1
 
         # child end station
-        if(node.tag == "End_Station"):  # check any end stations for errors
-            if(len(node.keys()) != 2):  # end stations must only have 2 attributes called "name" and "unique_id"
+        if node.tag == "End_Station":  # check any end stations for errors
+            if len(node.keys()) != 2:  # end stations must only have 2 attributes called "name" and "unique_id"
                 print("ERROR: End Station has too many attributes")
                 return -1
             if( ("unique_id" not in node.keys()) or ("name" not in node.keys()) ):
                 print("ERROR: Invalid end station attribute names")
                 return -1
-            if(int(node.get("unique_id")) in g_node_id_dict):  # make srue we dont have any duplicate IDs
+            if int(node.get("unique_id")) in g_node_id_dict:  # make sure we dont have any duplicate IDs
                 print("ERROR: Duplicate ID found (ID:", node.get("unique_id")+")")
                 return -1
-            if(len(node) != 0):  # end stations are not allowed any children
+            if len(node) != 0:  # end stations are not allowed any children
                 print("ERROR: End station (ID:", node.get("unique_id")+")", "has children")
                 return -1
-            if(int(node.get("unique_id")) in g_node_id_dict):  # make sure each ID is unique
+            if int(node.get("unique_id")) in g_node_id_dict:  # make sure each ID is unique
                 print("ERROR: Duplicate ID found (ID:", switch.get("unique_id")+")")
                 return -1
             end_station_count += 1  # no errors, add to count
             end_station_node = End_Station(int(node.get("unique_id")), node.get("name"))  # create node
             g_node_id_dict[int(node.get("unique_id"))] = end_station_node  # switch and its children are error free, add its ID to list
-        if(end_station_count < 1):  # must be at least 1 end station
+        if end_station_count < 1:  # must be at least 1 end station
             print("ERROR: There must be at least 1 end station connected to switch (ID:", switch.get("unique_id")+")")
             return -1
 
@@ -362,7 +384,7 @@ def parse_network_topo(f_network_topo):
     if( ("unique_id" not in controller.keys()) or ("name" not in controller.keys()) ):
         print("ERROR: Invalid controller attribute names")
         return -1
-    if controller.get("unique_id") != str(0):
+    if controller.get("unique_id") != str(0):  # controller ID must be 0
         print("ERROR: Controller ID must be 0")
         return -1
     controller_node = Controller(0, controller.get("name"))  # create controller node with id 0 and name from file
@@ -508,6 +530,127 @@ def parse_routing_table(f_network_topo):
 
 
 
+# function to parse the queue definition file
+def parse_queue_definition(f_queue_def, debug):
+
+    global g_node_id_dict, e_queue_schedules, e_queue_type_names
+
+    # parse XML file and get root
+    parser = etree.XMLParser(ns_clean=True)
+    tree = etree.parse(f_queue_def, parser)
+    root = tree.getroot()
+
+    # get a list of all switches present from the network topo
+    switch_list = []
+    for key in g_node_id_dict:
+        if g_node_id_dict[key].node_type == "Switch":
+            switch_list.append(key)
+    switch_list.append(0)  # controller is also a switch
+
+
+    ## Error checking and adding defaults
+    if len(switch_list) != len(root):  # amount of switches present in the network should match the amount in the switch definition
+        print("ERROR: Incorrect number of switches", "("+str(len(root)), "in queue definition vs", str(len(switch_list)), "in network)")
+        return -1
+
+    # check each switch in the file for errors
+    queue_def_switches = []
+    for switch in root:
+
+        if int(switch.get("unique_id")) not in switch_list:  # each switch ID in file should be in the actual switch list parsed from the network topology
+            print("ERROR: Unable to find switch", "("+"ID:", str(switch.get("unique_id"))+")", "from queue definition in the network")
+            return -1
+        if int(switch.get("unique_id")) in queue_def_switches:  # do not allow duplicate switch IDs
+            print("ERROR: Found duplicate Switch ID:", str(switch.get("unique_id")))
+            return -1
+        else:  # if not diplicate then add the id to the list
+            queue_def_switches.append(int(switch.get("unique_id")))
+        if len(switch) != 1:  # switches should only have 1 child, the types of queue it holds
+            print("ERROR: Switch (ID:", switch.get("unique_id")+") has incorrect number of children")
+            return -1
+        if switch[0].tag != "Queues":  # child should be called Queues
+            print("ERROR: Incorrect child name for queue types in Switch (ID:", switch.get("unique_id")+")")
+            return -1
+        if len(switch[0]) != len(e_queue_type_names):  # each switch should contain all 5 types of queue
+            print("ERROR: Queue type missing in Switch (ID:", switch.get("unique_id")+")")
+            return -1
+
+        # check each queue type in each switch for errors
+        queue_count = 0
+        queue_types_present = []
+        for queue_type in switch[0]:
+
+            if queue_type.tag not in e_queue_type_names:  # check the queue names match expected titles
+                print("ERROR: Unrecognised queue name:", queue_type.tag)
+                return -1
+            if queue_type.tag in queue_types_present:  # do not allow duplicate queue type names
+                print("ERROR: Found duplicate Queue type", "\""+str(queue_type.tag)+"\"", "in Switch (ID:", switch.get("unique_id")+")")
+                return -1
+            else:  # if not duplicate add the queue type to the temp list
+                queue_types_present.append(queue_type.tag)
+
+            if "count" not in queue_type.keys():  # every queue type must have at least a "count" attribute
+                print("ERROR: Queue", "\""+str(queue_type.tag)+"\"", "in Switch (ID:", \
+                      switch.get("unique_id")+")", "is missing \"count\" attribute")
+                return -1
+            if int(queue_type.get("count")) < 1:  # each queue type count attribute must be > 1 (cant have 0 of a queue)
+                print("ERROR: Cant have a queue count less than 1 in queue", "\""+str(queue_type.tag)+"\"", \
+                      "in Switch (ID:", switch.get("unique_id")+")")
+                return -1
+            queue_count += int(queue_type.get("count"))  # add count attribute to determine how many queues in this switch later on (max: 8)
+
+            if "schedule" not in queue_type.keys():  # each queue should contain a 'schedule' attribute, if not it defaults to FIFO
+                if debug:
+                    print("Switch (ID:", switch.get("unique_id")+") has not defined queue schedule as required. Defaulting to FIFO")
+                queue_type.set("schedule", e_queue_schedules[0])  # add schedule attribute to switch's queue type
+            if queue_type.get("schedule") not in e_queue_schedules:  # make sure schedule attribute is valid
+                print("ERROR: Unrecognised queue schedule for queue", "\""+str(queue_type.tag)+"\"", \
+                      "in Switch (ID:", switch.get("unique_id")+")")
+                return -1
+
+        # final checks
+        if queue_count > 8:  # cant be more than 8 queues per switch
+            print("ERROR: Found more than 8 queues in Switch (ID:", switch.get("unique_id")+")")
+            return -1
+        if queue_count < 8:  # if all queues present but less than 8 defined, fill the difference with BE queues
+            queues_needed = 8 - queue_count
+            if debug:
+                print("Switch (ID:", switch.get("unique_id")+") has not defined 8 queues as required.", \
+                      "Adding", queues_needed, "Best Effort queue"+("s" if queues_needed != 1 else ""), "to make up the difference")
+
+            for queue_type in switch[0]:
+                if queue_type.tag == "BE":  # find the BE queue to error check
+                    temp_count = int(queue_type.get("count"))
+                    temp_count += queues_needed
+                    queue_type.set("count", str(temp_count))  # set new count for BE queue
+
+
+        # now populate the current switch with its error checked queue definition further errors kill the program
+        ST_count, emergency_count, sporadic_hard_count, sporadic_soft_count, BE_count = [0, 0, 0, 0, 0]
+        ST_schedule, emergency_schedule, sporadic_hard_schedule, sporadic_soft_schedule, BE_schedule = [0, 0, 0, 0, 0]
+
+        for queue_type in switch[0]:
+            if queue_type.tag == "ST":
+                ST_count = int(queue_type.get("count"))
+                ST_schedule = str(queue_type.get("schedule"))
+            if queue_type.tag == "Emergency":
+                emergency_count = int(queue_type.get("count"))
+                emergency_schedule = str(queue_type.get("schedule"))
+            if queue_type.tag == "Sporadic_Hard":
+                sporadic_hard_count = int(queue_type.get("count"))
+                sporadic_hard_schedule = str(queue_type.get("schedule"))
+            if queue_type.tag == "Sporadic_Soft":
+                sporadic_soft_count = int(queue_type.get("count"))
+                sporadic_soft_schedule = str(queue_type.get("schedule"))
+            if queue_type.tag == "BE":
+                BE_count = int(queue_type.get("count"))
+                BE_schedule = str(queue_type.get("schedule"))
+
+        queue_def = Queue(ST_count, emergency_count, sporadic_hard_count, sporadic_soft_count, BE_count, \
+                          ST_schedule, emergency_schedule, sporadic_hard_schedule, sporadic_soft_schedule, BE_schedule)
+        g_node_id_dict[int(switch.get("unique_id"))].set_queue_def(queue_def)
+
+
 
 ##################################################
 ######## GET INPUT FILES OR GENERATE THEM ########
@@ -516,7 +659,8 @@ def parse_routing_table(f_network_topo):
 #        or to generate a new file via a crude generator script
 
 # specify file paths and names
-network_topo_file  = "example_network_topology.xml"
+network_topo_file     = "example_network_topology.xml"
+queue_definition_file = "example_queue_definition.xml"
 
 
 
@@ -531,6 +675,7 @@ if f.is_file():
         print("Successfully parsed network topology file:", "\""+network_topo_file+"\"")
 else:
     print("ERROR: Network topology not found:", "\""+network_topo_file+"\"")
+    # ask if they want to generate one and then point to other script here
     exit()
 
 
@@ -545,6 +690,26 @@ else:
     print("ERROR: Network topology file not found:", "\""+network_topo_file+"\"")
     exit()
 
+# PARSE GCL HERE TO GET GLOBAL OFFLINE GCL BEFORE INITIALISING QUEUE OBJECTS
+
+# parse queue definition from its xml file
+f = Path(queue_definition_file)
+if f.is_file():
+    queue_parse_result = parse_queue_definition(queue_definition_file, 0)  # func(file, debug)
+
+    if queue_parse_result == -1:
+        print("ERROR: In file:", "\""+queue_definition_file+"\"")
+        exit()
+    else:
+        print("Successfully parsed queue definition file:", "\""+queue_definition_file+"\"")
+else:
+    print("ERROR: Queue Definition not found:", "\""+queue_definition_file+"\"")
+    # would you like to generate one from current switch IDs
+    # will have to make generator script but keep everything within functions
+    # maybe move helper functions from crude topo generator into another script and have it as an include in the generator scripts
+    exit()  # if no
+
+
 
 
 
@@ -556,13 +721,11 @@ print()
 print("TEST START")
 print()
 
-print(g_node_id_dict[0].toString())
-g_node_id_dict[0].set_queue_def(2)
+print(g_node_id_dict[0].to_string())
 print("TYPE:", g_node_id_dict[0].node_type)
 print("rtable for Controller id 0:", g_node_id_dict[0].local_routing_table)
-print("qdef:", g_node_id_dict[0].queue)
-
-
+print()
+print(g_node_id_dict[0].queue_definition.to_string())
 
 
 print()
