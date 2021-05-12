@@ -8,8 +8,17 @@ Specify file locations for neccesay files (Network Topo, Traffic Definition, GCL
 ##################### IMPORT #####################
 ##################################################
 
+# libraries
 from pathlib import Path
 from lxml import etree
+
+# scripts
+import generator_utilities as gen_utils
+import crude_topo_generator as network_topo_gen  # network topology generator
+import crude_queue_def_generator as queue_def_gen  # queue definition generator
+# GCL should be made manually ahdering to standards in the UML diagrams -> T(digit){-T(digit)} (8-bits)
+
+
 
 
 ## global variables
@@ -21,8 +30,9 @@ e_queue_schedules = ["FIFO"]  # possible queue schedules
 e_queue_type_names = ["ST", "Emergency", "Sporadic_Hard", "Sporadic_Soft", "BE"]  # possible queue types
 
 
-g_node_id_dict = {}
-g_offline_GCL = {}  # key is timestamp, value is the gate state at that timestamp.
+g_generic_traffics_list = []  # list of generic traffics from file in the form of dicts NOT traffic objects
+g_node_id_dict = {}  # key is node id, value is node object
+g_offline_GCL = {}  # key is timestamp, value is the gate state at that timestamp
 # should only change gate state if we have a key for that timestamp, else leave it as previous value
 
 
@@ -175,15 +185,13 @@ class ST(Packet):
 
 
 # non-st traffic type. Abstraction. No traffic should directly be NonST
-# commonly called sporadic soft
 class NonST(Packet):
 
     def __init__(self, source, destination, priority, minimal_inter_release_time, delay_jitter_constraints, \
-                 period, name="unnamed", offset="0"):
+                 name="unnamed", offset="0"):
         super().__init__(source, destination, priority, name, offset)
         self.minimal_inter_release_time = minimal_inter_release_time
         self.delay_jitter_constraints = delay_jitter_constraints
-        self.period = period
 
 
 
@@ -191,8 +199,8 @@ class NonST(Packet):
 class Sporadic_Hard(NonST):
 
     def __init__(self, source, destination, priority, minimal_inter_release_time, delay_jitter_constraints, \
-                 period, deadline, name="unnamed", offset="0"):
-        super().__init__(source, destination, 2, minimal_inter_release_time, delay_jitter_constraints, period, name, offset)  # priority 2
+                 deadline, name="unnamed", offset="0"):
+        super().__init__(source, destination, 2, minimal_inter_release_time, delay_jitter_constraints, name, offset)  # priority 2
         self.hard_deadline = deadline
 
 
@@ -201,8 +209,8 @@ class Sporadic_Hard(NonST):
 class Sporadic_Soft(NonST):
 
     def __init__(self, source, destination, priority, minimal_inter_release_time, delay_jitter_constraints, \
-                 period, deadline, name="unnamed", offset="0"):
-        super().__init__(source, destination, 3, minimal_inter_release_time, delay_jitter_constraints, period, name, offset)  # priority 3
+                 deadline, name="unnamed", offset="0"):
+        super().__init__(source, destination, 3, minimal_inter_release_time, delay_jitter_constraints, name, offset)  # priority 3
         self.soft_deadline = deadline
 
 
@@ -211,8 +219,8 @@ class Sporadic_Soft(NonST):
 class Best_Effort(NonST):
 
     def __init__(self, source, destination, priority, minimal_inter_release_time, delay_jitter_constraints, \
-                 period, name="unnamed", offset="0"):
-        super().__init__(source, destination, 4, minimal_inter_release_time, delay_jitter_constraints, period, name, offset)  # priority 4
+                 name="unnamed", offset="0"):
+        super().__init__(source, destination, 4, minimal_inter_release_time, delay_jitter_constraints, name, offset)  # priority 4
 
 
 
@@ -282,7 +290,7 @@ class Queue:
         # print offline_GCL
         out_str += "\nOffline_GCL:\n"
         for key in self.offline_GCL:
-            out_str += str(key)+": "+str(self.offline_GCL[key])+"\n"  # if I end up using global just change this to global? 
+            out_str += str(key)+": "+str(self.offline_GCL[key])+"\n"  # if I end up using global just change this to global?
 
         # print active_GCL if it is different to offline_GCL
         if self.offline_GCL == self.active_GCL:
@@ -303,6 +311,49 @@ class Queue:
 ##################################################
 
 ## HELPERS
+# function to bulk parse all inputs
+def bullk_parse(network_topo_file, queue_definition_file, GCL_file, traffic_definition_file):
+
+    # network topo
+    n_topo_return_value = network_topo_parse_wrapper(network_topo_file)
+    if n_topo_return_value == 0:
+        return 0
+    elif type(n_topo_return_value) is tuple:  # else if there is a filename change
+        network_topo_file = n_topo_return_value[0]
+        if n_topo_return_value[1] == 0:  # if it still failed
+            return 0
+
+    # routing table
+    if routing_table_parse_wrapper(network_topo_file) == 0:
+        return 0
+
+    # GCL
+    if GCL_parse_wrapper(GCL_file) == 0:
+        return 0
+
+    # queue definition
+    if queue_def_parse_wrapper(queue_definition_file) == 0:
+        return 0
+
+
+
+    # parse the generic types of traffic our simulator will be able to send
+    f = Path(traffic_definition_file)
+    if f.is_file():
+        if parse_traffic_definition(traffic_definition_file) == 0:
+            print("ERROR: In file:", "\""+traffic_definition_file+"\"")
+            return 0
+        else:
+            print("Successfully parsed traffic definition file:", "\""+traffic_definition_file+"\"")
+    else:
+        print("ERROR: Traffic definition not found:", "\""+traffic_definition_file+"\"")
+        return 0
+
+
+    return 1
+
+
+
 # helper function to recursively check switches are error free
 def error_check_switch(switch):
 
@@ -315,55 +366,55 @@ def error_check_switch(switch):
     # check the switch itself for errors
     if len(switch.keys()) != 2:  # switch must only have 2 attributes called "name" and "unique_id"
         print("ERROR: A switch has too many attributes")
-        return -1
+        return 0
     if( ("unique_id" not in switch.keys()) or ("name" not in switch.keys()) ):
         print("ERROR: Invalid switch attribute names")
-        return -1
+        return 0
     if int(switch.get("unique_id")) in g_node_id_dict:  # make sure each ID is unique
         print("ERROR: Duplicate ID found (ID:", switch.get("unique_id")+")")
-        return -1
+        return 0
     if child_nodes_count < 1:  # must be at least 1 other node connected to a switch
         print("ERROR: There must be at least 1 end station connected to switch (ID:", switch.get("unique_id")+")")
-        return -1
+        return 0
 
 
     # check children for errors
     for node in switch:
         if( (node.tag != "Switch") and (node.tag != "End_Station") ):  # only switches or end stations can be children of switches
             print("ERROR: Invalid switch node tag connected to switch (ID:", switch.get("unique_id")+")")
-            return -1
+            return 0
 
         # child end station
         if node.tag == "End_Station":  # check any end stations for errors
             if len(node.keys()) != 2:  # end stations must only have 2 attributes called "name" and "unique_id"
                 print("ERROR: End Station has too many attributes")
-                return -1
+                return 0
             if( ("unique_id" not in node.keys()) or ("name" not in node.keys()) ):
                 print("ERROR: Invalid end station attribute names")
-                return -1
+                return 0
             if int(node.get("unique_id")) in g_node_id_dict:  # make sure we dont have any duplicate IDs
                 print("ERROR: Duplicate ID found (ID:", node.get("unique_id")+")")
-                return -1
+                return 0
             if len(node) != 0:  # end stations are not allowed any children
                 print("ERROR: End station (ID:", node.get("unique_id")+")", "has children")
-                return -1
+                return 0
             if int(node.get("unique_id")) in g_node_id_dict:  # make sure each ID is unique
                 print("ERROR: Duplicate ID found (ID:", switch.get("unique_id")+")")
-                return -1
+                return 0
             end_station_count += 1  # no errors, add to count
             end_station_node = End_Station(int(node.get("unique_id")), node.get("name"))  # create node
             g_node_id_dict[int(node.get("unique_id"))] = end_station_node  # switch and its children are error free, add its ID to list
         if end_station_count < 1:  # must be at least 1 end station
             print("ERROR: There must be at least 1 end station connected to switch (ID:", switch.get("unique_id")+")")
-            return -1
+            return 0
 
         # child switch
         if node.tag == "Switch":
-            if error_check_switch(node) == -1:  # recursively check for errors on this switch and its children switches if any
-                return -1
+            if error_check_switch(node) == 0:  # recursively check for errors on this switch and its children switches if any
+                return 0
             if int(node.get("unique_id")) in g_node_id_dict:  # double check none of its children has its ID before adding it
                 print("ERROR: Duplicate ID found (ID:", node.get("unique_id")+")")
-                return -1
+                return 0
             switch_count += 1
             switch_node = Switch(int(node.get("unique_id")), node.get("name"))  # create node
             g_node_id_dict[int(node.get("unique_id"))] = switch_node  # switch and its children are error free, add its ID to list
@@ -389,19 +440,19 @@ def parse_network_topo(f_network_topo):
     controller = root[0]
     if len(root) != 1:  # only 1 controller permitted
         print("ERROR: Invalid controller count")
-        return -1
+        return 0
     if controller.tag != "Controller":  # controller must be called "Controller" at depth 1 in the XML
         print("ERROR: Controller missing or at incorrect depth")
-        return -1
+        return 0
     if len(controller.keys()) != 2:  # controller must only have 2 attributes called "name" and "unique_id"
         print("ERROR: Controler has too many attributes")
-        return -1
+        return 0
     if( ("unique_id" not in controller.keys()) or ("name" not in controller.keys()) ):
         print("ERROR: Invalid controller attribute names")
-        return -1
+        return 0
     if controller.get("unique_id") != str(0):  # controller ID must be 0
         print("ERROR: Controller ID must be 0")
-        return -1
+        return 0
     controller_node = Controller(0, controller.get("name"))  # create controller node with id 0 and name from file
     g_node_id_dict[0] = controller_node  # add controller to global node list
 
@@ -410,16 +461,16 @@ def parse_network_topo(f_network_topo):
     switch_count = len(root[0])
     if switch_count < 1:  # must be at least 1 switch
         print("ERROR: There must be at least 1 switch")
-        return -1
+        return 0
     for switch in controller:
         if switch.tag != "Switch":  # make sure we only have switches and not end stations connected to the controller
             print("ERROR: Invalid switch node tag connected to the Controller")
-            return -1
-        if error_check_switch(switch) == -1:  # recursively check for errors on this switch and its children switches if any
-            return -1
+            return 0
+        if error_check_switch(switch) == 0:  # recursively check for errors on this switch and its children switches if any
+            return 0
         if int(switch.get("unique_id")) in g_node_id_dict:  # double check none of its children has its ID before adding it
             print("ERROR: Duplicate ID found (ID:", switch.get("unique_id")+")")
-            return -1
+            return 0
         switch_node = Switch(int(switch.get("unique_id")), switch.get("name"))  # create node
         g_node_id_dict[int(switch.get("unique_id"))] = switch_node  # switch and its children are error free, add its ID to list
 
@@ -428,7 +479,7 @@ def parse_network_topo(f_network_topo):
     # check we havent exceeded the max count
     if len(g_node_id_dict) > MAX_NODE_COUNT:
         print("ERROR: Too many nodes:", len(g_node_id_dict), "(MAX:", str(MAX_NODE_COUNT)+")")
-        return -1
+        return 0
 
     return 1
 
@@ -523,12 +574,12 @@ def parse_routing_table(f_network_topo):
     for key in routing_table:
         if len(routing_table[key]) != len(end_station_list):
             print("ERROR: Entry \""+key+"\"", "in the global routing table has an incorrect amount of children")
-            return -1
+            return 0
 
     # each switch should be present in the routing table
     if len(routing_table) != len(switch_list):
         print("ERROR: Incorrect amount of switches present in the global routing table")
-        return -1
+        return 0
 
 
     # populate switch objects with their appropriate routing table
@@ -544,9 +595,8 @@ def parse_routing_table(f_network_topo):
     return 1
 
 
-
 # function to parse the queue definition file
-def parse_queue_definition(f_queue_def, debug):
+def parse_queue_definition(f_queue_def, debug=0):
 
     global g_node_id_dict, e_queue_schedules, e_queue_type_names
 
@@ -566,7 +616,7 @@ def parse_queue_definition(f_queue_def, debug):
     ## Error checking and adding defaults
     if len(switch_list) != len(root):  # amount of switches present in the network should match the amount in the switch definition
         print("ERROR: Incorrect number of switches", "("+str(len(root)), "in queue definition vs", str(len(switch_list)), "in network)")
-        return -1
+        return 0
 
     # check each switch in the file for errors
     queue_def_switches = []
@@ -574,21 +624,21 @@ def parse_queue_definition(f_queue_def, debug):
 
         if int(switch.get("unique_id")) not in switch_list:  # each switch ID in file should be in the actual switch list parsed from the network topology
             print("ERROR: Unable to find switch", "("+"ID:", str(switch.get("unique_id"))+")", "from queue definition in the network")
-            return -1
+            return 0
         if int(switch.get("unique_id")) in queue_def_switches:  # do not allow duplicate switch IDs
             print("ERROR: Found duplicate Switch ID:", str(switch.get("unique_id")))
-            return -1
+            return 0
         else:  # if not diplicate then add the id to the list
             queue_def_switches.append(int(switch.get("unique_id")))
         if len(switch) != 1:  # switches should only have 1 child, the types of queue it holds
             print("ERROR: Switch (ID:", switch.get("unique_id")+") has incorrect number of children")
-            return -1
+            return 0
         if switch[0].tag != "Queues":  # child should be called Queues
             print("ERROR: Incorrect child name for queue types in Switch (ID:", switch.get("unique_id")+")")
-            return -1
+            return 0
         if len(switch[0]) != len(e_queue_type_names):  # each switch should contain all 5 types of queue
             print("ERROR: Queue type missing in Switch (ID:", switch.get("unique_id")+")")
-            return -1
+            return 0
 
         # check each queue type in each switch for errors
         queue_count = 0
@@ -597,21 +647,21 @@ def parse_queue_definition(f_queue_def, debug):
 
             if queue_type.tag not in e_queue_type_names:  # check the queue names match expected titles
                 print("ERROR: Unrecognised queue name:", queue_type.tag)
-                return -1
+                return 0
             if queue_type.tag in queue_types_present:  # do not allow duplicate queue type names
                 print("ERROR: Found duplicate Queue type", "\""+str(queue_type.tag)+"\"", "in Switch (ID:", switch.get("unique_id")+")")
-                return -1
+                return 0
             else:  # if not duplicate add the queue type to the temp list
                 queue_types_present.append(queue_type.tag)
 
             if "count" not in queue_type.keys():  # every queue type must have at least a "count" attribute
                 print("ERROR: Queue", "\""+str(queue_type.tag)+"\"", "in Switch (ID:", \
                       switch.get("unique_id")+")", "is missing \"count\" attribute")
-                return -1
+                return 0
             if int(queue_type.get("count")) < 1:  # each queue type count attribute must be > 1 (cant have 0 of a queue)
                 print("ERROR: Cant have a queue count less than 1 in queue", "\""+str(queue_type.tag)+"\"", \
                       "in Switch (ID:", switch.get("unique_id")+")")
-                return -1
+                return 0
             queue_count += int(queue_type.get("count"))  # add count attribute to determine how many queues in this switch later on (max: 8)
 
             if "schedule" not in queue_type.keys():  # each queue should contain a 'schedule' attribute, if not it defaults to FIFO
@@ -621,12 +671,12 @@ def parse_queue_definition(f_queue_def, debug):
             if queue_type.get("schedule") not in e_queue_schedules:  # make sure schedule attribute is valid
                 print("ERROR: Unrecognised queue schedule for queue", "\""+str(queue_type.tag)+"\"", \
                       "in Switch (ID:", switch.get("unique_id")+")")
-                return -1
+                return 0
 
         # final checks
         if queue_count > 8:  # cant be more than 8 queues per switch
             print("ERROR: Found more than 8 queues in Switch (ID:", switch.get("unique_id")+")")
-            return -1
+            return 0
         if queue_count < 8:  # if all queues present but less than 8 defined, fill the difference with BE queues
             queues_needed = 8 - queue_count
             if debug:
@@ -682,10 +732,10 @@ def parse_GCL(f_GCL):
 
         if( (f_lines[0][0:3] != "T0 ") and (f_lines[0][0:3] != "T0-T") ):  # first line should be T0
             print("ERROR: First line in GCL must start at timestamp T0")
-            return -1
+            return 0
         if( (f_lines[-1][-7:] != " REPEAT") and (f_lines[-1][-7:] != " repeat") ):  # last line should contain REPEAT statement
             print("ERROR: Final line of GCL should be REPEAT")
-            return -1
+            return 0
 
 
         # check each line for errors
@@ -694,11 +744,11 @@ def parse_GCL(f_GCL):
 
             if line[0] != "T":  # all lines should start with T
                 print("ERROR: Every line in the GCL must start with a T")
-                return -1
+                return 0
             if "-" in line:  # groups should have both timestamps starting with T
                 if( (line.split('-')[0][0] != "T") or (line.split('-')[1][0] != "T") ):
                     print("ERROR: In group timestamp", "\""+str(line.split(' ')[0])+"\"", "both sides should start with \"T\"")
-                    return -1
+                    return 0
 
 
             # if not the final line
@@ -706,10 +756,10 @@ def parse_GCL(f_GCL):
                 for index in range(1, 9):  # check final 8 positions for 0's and 1's
                     if( (line[-index] != "1") and (line[-index] != "0") ):
                         print("ERROR: GCL string must be made up of 0's and 1's at line", "\""+str(line)+"\"")
-                        return -1
+                        return 0
                 if line[-9] != " ":  # make sure timestamps are seperated from the gate positions by spaces " "
                     print("ERROR: Timestamps must be followed by a space")
-                    return -1
+                    return 0
 
 
             # final error check (for sequential timestamps) AND add data to global GCL list here
@@ -722,7 +772,7 @@ def parse_GCL(f_GCL):
                     current_timestamp += group_size+1
                 else:
                     print("ERROR: Timestamp value at line", "\""+str(line)+"\"", "is not sequential")
-                    return -1
+                    return 0
 
             else:  # else it is a single timestamp
                 if int(timing[1:]) == current_timestamp+1:  # if current timestamp+1 is the next timestamp in the GCL
@@ -731,10 +781,332 @@ def parse_GCL(f_GCL):
                     g_offline_GCL[current_timestamp] = line.split(' ')[1]  # add gate state to dictionary for this timestamp
                 else:
                     print("ERROR: Timestamp value at line", "\""+str(line)+"\"", "is not sequential")
-                    return -1
+                    return 0
 
 
     return 1
+
+
+
+# function to error check and parse the traffic definiton file
+def parse_traffic_definition(f_traffic_def, debug=0):
+
+    global g_generic_traffics_list
+    traffic_types = e_queue_type_names  # traffic can be same types as queue types
+
+    # except we cant initialise the Emergency type traffic, ST -> Emergency is infered by the simulator itself
+    traffic_types.remove("Emergency")
+
+
+    # parse XML file and get root
+    parser = etree.XMLParser(ns_clean=True)
+    tree = etree.parse(f_traffic_def, parser)
+    root = tree.getroot()
+
+
+    ## error checks and object building
+    if len(root) < 1:  # make sure there is at least 1 type of traffic
+        print("ERROR: There must be at least 1 type of traffic defined")
+        return 0
+
+    traffic_ids = []  # used to keep track of all IDs to make sure there are no duplicates
+    for child in root:  # error check and build dict per traffic type
+
+        if child.tag != "Traffic":  # all traffic definitions must be tagged with "Traffic"
+            print("ERROR: Invalid name found for child:", "\""+child.tag+"\". Must be \"Traffic\"")
+            return 0
+        if "unique_id" not in child.keys():  # each traffic definition must have at least 1 attribute called unique_id
+            print("ERROR: Traffic definitions must have a \"unique_id\" attribute")
+            return 0
+        if int(child.get("unique_id")) in traffic_ids:  # each unique id must be unique
+            print("ERROR: Found duplicate traffic ID:", child.get("unique_id"))
+            return 0
+        else:  # otherwise add it to the current ID list
+            traffic_ids.append(int(child.get("unique_id")))
+        if "name" not in child.keys():  # check for a name attribute
+            if debug:
+                print("Child ID:", child.get("unique_id"), "has no \"name\" attribute. Defaulting to \"unnamed\"")
+            child.set("name", "unnamed")
+        if "offset" not in child.keys():  # check for a name attribute
+            if debug:
+                print("Child ID:", child.get("unique_id"), "has no \"offset\" attribute. Defaulting to \"0\"")
+            child.set("offset", "0")
+        if len(child.keys()) != 3:  # traffic should only have 3 attributes. "unique_id", "name" and "offset"
+            print("ERROR: Traffic (ID:", child.get("unique_id")+")", "has incorrect amount of attributes (should be 3)")
+            return 0
+        if len(child) != 1:  # traffic should only have 1 child, the type of traffic it is
+            print("ERROR: Traffic (ID:", child.get("unique_id")+") has incorrect number of children")
+            return 0
+
+
+        # deal with specific traffic types and prepare objects for the child
+        traffic_type = {}
+        if child[0].tag == traffic_types[0]:  # ST Traffic
+            max_release_jitter = 0.0
+            hard_deadline = 0.0
+            period = 0.0
+
+            if len(child[0].keys()) != 3:  # must have 3 attributes
+                print("ERROR: Traffic (ID:", child.get("unique_id")+") type has incorrect number of attributes")
+                return 0
+            if "max_release_jitter" not in child[0].keys():  # max_release_jitter -> delay_jitter_constraints
+                print("ERROR: Traffic (ID:", child.get("unique_id")+") is missing \"max_release_jitter\" attribute")
+                return 0
+            else:
+                max_release_jitter = float(child[0].get("max_release_jitter"))
+            if "hard_deadline" not in child[0].keys():  # hard deadline
+                print("ERROR: Traffic (ID:", child.get("unique_id")+") is missing \"hard_deadline\" attribute")
+                return 0
+            else:
+                hard_deadline = float(child[0].get("hard_deadline"))
+            if "period" not in child[0].keys():  # period
+                print("ERROR: Traffic (ID:", child.get("unique_id")+") is missing \"period\" attribute")
+                return 0
+            else:
+                period = float(child[0].get("period"))
+
+            # start building dict
+            traffic_type["max_release_jitter"] = float(max_release_jitter)
+            traffic_type["hard_deadline"] = float(hard_deadline)
+            traffic_type["period"] = float(period)
+            traffic_type["type"] = str(traffic_types[0])
+
+
+        elif child[0].tag == traffic_types[1]:  # Sporadic Hard
+            max_release_jitter = 0.0
+            hard_deadline = 0.0
+            min_inter_release = 0.0  # if this remains 0 then we have aperiodic traffic
+
+            if len(child[0].keys()) != 3:  # must have 3 attributes
+                print("ERROR: Traffic (ID:", child.get("unique_id")+") type has incorrect number of attributes")
+                return 0
+            if "max_release_jitter" not in child[0].keys():  # max_release_jitter -> delay_jitter_constraints
+                print("ERROR: Traffic (ID:", child.get("unique_id")+") is missing \"max_release_jitter\" attribute")
+                return 0
+            else:
+                max_release_jitter = float(child[0].get("max_release_jitter"))
+            if "min_inter_release" not in child[0].keys():  # min_inter_release
+                print("ERROR: Traffic (ID:", child.get("unique_id")+") is missing \"min_inter_release\" attribute")
+                return 0
+            else:
+                min_inter_release = float(child[0].get("min_inter_release"))
+            if "hard_deadline" not in child[0].keys():  # hard deadline
+                print("ERROR: Traffic (ID:", child.get("unique_id")+") is missing \"hard_deadline\" attribute")
+                return 0
+            else:
+                hard_deadline = float(child[0].get("hard_deadline"))
+
+            # start building dict
+            traffic_type["max_release_jitter"] = float(max_release_jitter)
+            traffic_type["hard_deadline"] = float(hard_deadline)
+            traffic_type["min_inter_release"] = float(min_inter_release)
+            traffic_type["type"] = str(traffic_types[1])
+
+
+        elif child[0].tag == traffic_types[2]:  # Sporadic Soft
+            max_release_jitter = 0.0
+            soft_deadline = 0.0
+            min_inter_release = 0.0  # if this remains 0 then we have aperiodic traffic
+
+            if len(child[0].keys()) != 3:  # must have 3 attributes
+                print("ERROR: Traffic (ID:", child.get("unique_id")+") type has incorrect number of attributes")
+                return 0
+            if "max_release_jitter" not in child[0].keys():  # max_release_jitter -> delay_jitter_constraints
+                print("ERROR: Traffic (ID:", child.get("unique_id")+") is missing \"max_release_jitter\" attribute")
+                return 0
+            else:
+                max_release_jitter = float(child[0].get("max_release_jitter"))
+            if "min_inter_release" not in child[0].keys():  # min_inter_release
+                print("ERROR: Traffic (ID:", child.get("unique_id")+") is missing \"min_inter_release\" attribute")
+                return 0
+            else:
+                min_inter_release = float(child[0].get("min_inter_release"))
+            if "soft_deadline" not in child[0].keys():  # hard deadline
+                print("ERROR: Traffic (ID:", child.get("unique_id")+") is missing \"soft_deadline\" attribute")
+                return 0
+            else:
+                soft_deadline = float(child[0].get("soft_deadline"))
+
+            # start building dict
+            traffic_type["max_release_jitter"] = float(max_release_jitter)
+            traffic_type["soft_deadline"] = float(soft_deadline)
+            traffic_type["min_inter_release"] = float(min_inter_release)
+            traffic_type["type"] = str(traffic_types[2])
+
+
+        elif child[0].tag == traffic_types[3]:  # BE has no time limitations
+            traffic_type["type"] = str(traffic_types[3])  # only need type for dict
+
+        else:  # unrecognised
+            print("ERROR: Traffic (ID:", child.get("unique_id")+") has invalid traffic type:", child[0].tag)
+            return 0
+
+
+        # continue building the dict and then add it to the global list of generic types
+        traffic_type["unique_id"] = int(child.get("unique_id"))
+        traffic_type["offset"] = int(child.get("offset"))
+        traffic_type["name"] = str(child.get("name"))
+        g_generic_traffics_list.append(traffic_type)
+
+    return 1
+
+
+
+## WRAPPERS
+# network topo parser wrapper
+def network_topo_parse_wrapper(network_topo_file):
+
+    # parse network topo from given file
+    f = Path(network_topo_file)
+    if f.is_file():
+        if(parse_network_topo(network_topo_file) == 0):  # file syntax error
+            print("ERROR: In file:", "\""+network_topo_file+"\"")
+            return 0
+        else:
+            print("Successfully parsed network topology file:", "\""+network_topo_file+"\"")
+            return 1
+    else:
+        print("ERROR: Network topology not found:", "\""+network_topo_file+"\"")
+
+        # see if the user wants to generate a new topology
+        if gen_utils.get_YesNo_descision("Would you like to create a Network Topology?"):
+            if gen_utils.get_YesNo_descision("Would you like to use the same name ("+str(network_topo_file)+")?"):  # keep same filename
+                network_topo_gen.generate(network_topo_file, MAX_NODE_COUNT)  # call generator
+                return network_topo_parse_wrapper(network_topo_file)  # re-parse
+
+            else:  # generate new topo with different filename
+                new_filename = "simulator_files\\"
+                new_filename += gen_utils.get_str_descision("Enter a filename for the Network Topology (do NOT include .xml)", \
+                                                            restricted_only=True)
+                new_filename += ".xml"
+                print("Accepted filename:", new_filename)
+                network_topo_gen.generate(new_filename, max_nodes=MAX_NODE_COUNT)  # call generator
+                return (new_filename, network_topo_parse_wrapper(new_filename))  # re-parse and return new filename for routing table parse
+
+        # see if the user wants to search for a different filename
+        elif gen_utils.get_YesNo_descision("Would you like to look for a different Topology filename?"):
+            new_filename = "simulator_files\\"
+            new_filename += gen_utils.get_str_descision("Enter a filename for the Network Topology (do NOT include .xml)", \
+                                                       restricted_only=True)
+            new_filename += ".xml"
+            print("Trying filename: \""+new_filename+"\"")
+            return (new_filename, network_topo_parse_wrapper(new_filename))
+
+        # if no new file generated and the user doesnt want to search for one then
+        print("ERROR: Cannot run simulator without a valid network topology")
+        return 0
+
+
+
+# routing table parser wrapper
+def routing_table_parse_wrapper(network_topo_file):
+
+    # parse routing table from the network topology file
+    f = Path(network_topo_file)
+    if f.is_file():
+        if(parse_routing_table(network_topo_file) == 0):  # file syntax error
+            print("ERROR: In file:", "\""+network_topo_file+"\"")
+            return 0
+        else:
+            print("Successfully parsed routing table from file:", "\""+network_topo_file+"\"")
+            return 1
+    else:
+        print("ERROR: Network topology file not found:", "\""+network_topo_file+"\". Unable to parse routing table")
+        return 0
+
+
+
+# GCL parser wrapper
+def GCL_parse_wrapper(GCL_file):
+
+    f = Path(GCL_file)
+    if f.is_file():
+        if parse_GCL(GCL_file) == 0:  # file syntax error
+            print("ERROR: In file:", "\""+GCL_file+"\"")
+            return 0
+        else:
+            print("Successfully parsed GCL file:", "\""+GCL_file+"\"")
+            return 1
+    else:
+        print("ERROR: GCL not found:", "\""+GCL_file+"\"")
+
+        # see if the user wants to search for another file
+        if gen_utils.get_YesNo_descision("Would you like to look for a different GCL filename?"):
+            new_filename = "simulator_files\\"
+            new_filename += gen_utils.get_str_descision("Enter a filename for the GCL (DO include file extension)", \
+                                                        restricted_only=True)
+            print("Trying filename: \""+new_filename+"\"")
+            return GCL_parse_wrapper(new_filename)
+        return 0
+
+
+
+# queue definition parser wrapper
+def queue_def_parse_wrapper(queue_definition_file):
+
+    # parse queue definition from its xml file
+    f = Path(queue_definition_file)
+    if f.is_file():
+        if parse_queue_definition(queue_definition_file) == 0:  # syntax error
+            print("ERROR: In file:", "\""+queue_definition_file+"\"")
+            return 0
+        else:
+            print("Successfully parsed queue definition file:", "\""+queue_definition_file+"\"")
+            return 1
+    else:
+        print("ERROR: Queue Definition not found:", "\""+queue_definition_file+"\"")
+
+        if gen_utils.get_YesNo_descision("Would you like to create a new Queue Definition?"):
+
+            # see if user wants to change the filename
+            new_filename_in_use = False
+            new_filename = ""
+            if gen_utils.get_YesNo_descision("Would you like to use the current filename ("+queue_definition_file+")?"):
+                new_filename_in_use = False  # do nothing so we can use the same filename
+            else:  # get new filename
+                new_filename_in_use = True
+                new_filename = "simulator_files\\"
+                new_filename += gen_utils.get_str_descision("Enter a filename for the Queue Definition file (do NOT include .xml)", \
+                                                            restricted_only=True)
+                new_filename += ".xml"
+                print("Accepted filename:", new_filename)
+
+
+            # see if the user wants to use the current switch ID list from the network topo for simplicity
+            if gen_utils.get_YesNo_descision("Would you like to use the current switch IDs from the Network Topology?"):
+
+                # get list of IDs into a list()
+                id_list_to_send = [key for key in g_node_id_dict]
+
+                if new_filename_in_use:  # call queue def generator with new filename and current IDs and try to reparse
+                    queue_def_gen.generate(new_filename, MAX_NODE_COUNT, id_list_to_send, e_queue_schedules)
+                    return queue_def_parse_wrapper(new_filename)
+                else:  # call queue def generator with old filename and current IDs and try to reparse
+                    queue_def_gen.generate(queue_definition_file, MAX_NODE_COUNT, id_list_to_send, e_queue_schedules)
+                    return queue_def_parse_wrapper(queue_definition_file)
+
+
+            else:
+                if new_filename_in_use:  # call queue def generator with new filename and no IDs and try to reparse
+                    queue_def_gen.generate(new_filename, MAX_NODE_COUNT, allowed_schedules=e_queue_schedules)
+                    return queue_def_parse_wrapper(new_filename)
+                else:  # call queue def generator with old filename and no IDs and try to reparse
+                    queue_def_gen.generate(queue_definition_file, MAX_NODE_COUNT, allowed_schedules=e_queue_schedules)
+                    return queue_def_parse_wrapper(queue_definition_file)
+
+
+        # if user doesnt want to create a new one - see if they want to search for a different one
+        elif gen_utils.get_YesNo_descision("Would you like to look for a different Queue Definition filename?"):
+            new_filename = "simulator_files\\"
+            new_filename += gen_utils.get_str_descision("Enter a filename for the Queue Definition (do NOT include .xml)", \
+                                                        restricted_only=True)
+            new_filename += ".xml"
+            print("Trying filename: \""+new_filename+"\"")
+            return queue_def_parse_wrapper(new_filename)  # dont need to return the new filename as nothing else needs it
+
+        # if no new definition generated and the user doesnt want to search for one then:
+        print("ERROR: Cannot run simulator without a valid Queue Definition file")
+        return 0
 
 
 
@@ -744,69 +1116,17 @@ def parse_GCL(f_GCL):
 ##################################################
 # TODO : Have option to input file name if none provided here,
 #        or to generate a new file via a crude generator script
+# TODO : This should probably be a function or in another script
 
 # specify file paths and names
-network_topo_file     = "example_network_topology.xml"
-queue_definition_file = "example_queue_definition.xml"
-GCL_file              = "example_gcl.txt"
+network_topo_file       = "simulator_files\\example_network_topology.xml"
+queue_definition_file   = "simulator_files\\example_queue_definition.xml"
+GCL_file                = "simulator_files\\example_gcl.txt"
+traffic_definition_file = "simulator_files\\example_traffic_definition.xml"
 
-
-
-### Parse given files
-# TODO? : make this into a function to make this more modular?
-# network topo
-f = Path(network_topo_file)
-if f.is_file():
-    if(parse_network_topo(network_topo_file) == -1):
-        print("ERROR: In file:", "\""+network_topo_file+"\"")
-        exit()
-    else:
-        print("Successfully parsed network topology file:", "\""+network_topo_file+"\"")
-else:
-    print("ERROR: Network topology not found:", "\""+network_topo_file+"\"")
-    # ask if they want to generate one and then point to other script here
+if bullk_parse(network_topo_file, queue_definition_file, GCL_file, traffic_definition_file) == 0:
+    print("FAILED TO PARSE FILES")
     exit()
-
-
-# parse routing table from the network topology file
-if f.is_file():
-    if(parse_routing_table(network_topo_file) == -1):
-        print("ERROR: In file:", "\""+network_topo_file+"\"")
-        exit()
-    else:
-        print("Successfully parsed routing table from file:", "\""+network_topo_file+"\"")
-else:
-    print("ERROR: Network topology file not found:", "\""+network_topo_file+"\"")
-    exit()
-
-
-# PARSE GCL HERE TO GET GLOBAL OFFLINE GCL BEFORE INITIALISING QUEUE OBJECTS
-f = Path(GCL_file)
-if f.is_file():
-    if parse_GCL(GCL_file) == -1:
-        print("ERROR: In file:", "\""+GCL_file+"\"")
-        exit()
-    else:
-        print("Successfully parsed GCL file:", "\""+GCL_file+"\"")
-else:
-    print("ERROR: GCL not found:", "\""+GCL_file+"\"")
-
-
-# parse queue definition from its xml file
-f = Path(queue_definition_file)
-if f.is_file():
-    if parse_queue_definition(queue_definition_file, 0) == -1:
-        print("ERROR: In file:", "\""+queue_definition_file+"\"")
-        exit()
-    else:
-        print("Successfully parsed queue definition file:", "\""+queue_definition_file+"\"")
-else:
-    print("ERROR: Queue Definition not found:", "\""+queue_definition_file+"\"")
-    # would you like to generate one from current switch IDs
-    # will have to make generator script but keep everything within functions
-    # maybe move helper functions from crude topo generator into another script and have it as an include in the generator scripts
-    exit()  # if no
-
 
 
 

@@ -2,7 +2,8 @@
 Documents
 Images
 
+# Ignore cache
+__pycache__
+
 # Ignore test work
-test.py
 M_*
-network_topology.xml
