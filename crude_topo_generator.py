@@ -88,7 +88,7 @@ class Generator():
                 if max_new_nodes >= 0:  # leave while loop if we have enough room
                     break
                 else:
-                    print(root_switches_count, "switches is too many for the defined MAX_NODES. Try again with a lower amount")
+                    print(root_switches_count, "switches is too many for the defined MAX_NODES ("+str(self.MAX_NODES)+")\n")
             else:  # only need to check of there is more than 1 base switch
                 break
 
@@ -176,7 +176,7 @@ class Generator():
                     self.reserved_node_count += 2*sw_count  # if accepted add these as reserved nodes
                     break
                 else:
-                    print(sw_count, "switches is too many for the defined MAX_NODES. Try agagin with a lower amount")
+                    print(sw_count, "switches is too many for the defined MAX_NODES ("+str(self.MAX_NODES)+")\n")
             else:
                 break  # no change if no switches added
 
@@ -222,5 +222,5 @@ class Generator():
 ################### FOR  DEBUG ###################
 ##################################################
 
-# fn = "simulator_files\M_network_topology.xml"
+# fn = "simulator_files\\M_network_topology.xml"
 # generate(fn)

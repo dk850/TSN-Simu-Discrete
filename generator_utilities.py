@@ -25,7 +25,7 @@ def get_YesNo_descision(prompt_question):
         elif (descision == "N") or (descision == "n"):
             final_descision = False
         else:
-            print("\""+descision+"\"", "unrecognised (only Y or N accepted)")
+            print("\""+descision+"\"", "unrecognised (only Y or N accepted)\n")
 
     return final_descision
 
@@ -54,9 +54,39 @@ def get_int_descision(prompt_question, min_int=-99999999, max_int=+99999999):
                 print("Please try again with an integer between", str(min_int), "and", str(max_int), "\n")
                 final_count = "temp"
         else:
-            print("\""+final_count+"\"", "is not an integer")
+            print("\""+final_count+"\"", "is not an integer\n")
 
     return int(final_count)
+
+
+
+# Helper function to ask the user a question and return a FLOAT value with optional equality constraints
+def get_float_descision(prompt_question, min_float=-99999999.0, max_float=+99999999.0):
+    final_count = "temp"
+
+    # critical error if max float smaller than min float
+    if max_float < min_float:
+        print("CRITICAL ERROR: max_float cant be smaller than min_float in function get_float_descision", \
+              "MAX:", max_float, "MIN:", min_float)
+        exit()
+
+
+    # make sure the user has selected a float for us to return
+    while 1:
+        final_count = input(prompt_question+" ")  # ask
+
+        try:
+            if min_float <= float(final_count) <= max_float:
+                break
+            else:
+                print("Please try again with a float between", str(min_float), "and", str(max_float), "\n")
+                final_count = "temp"
+
+        except ValueError:  # if not float
+            print("\""+final_count+"\"", "is not a float\n")
+            final_count = "temp"
+
+    return float(final_count)
 
 
 
@@ -72,7 +102,7 @@ def get_str_descision(prompt_question, alpha_only=False, alnum_only=False, restr
             if final_answer.isalpha():
                 break
             else:
-                print("\""+final_answer+"\"", "is not an alphabetic string (no spaces or numbers allowed)")
+                print("\""+final_answer+"\"", "is not an alphabetic string (no spaces or numbers allowed)\n")
 
     # if alphanumeric
     elif alnum_only:
@@ -82,7 +112,7 @@ def get_str_descision(prompt_question, alpha_only=False, alnum_only=False, restr
             if final_answer.isalnum():
                 break
             else:
-                print("\""+final_answer+"\"", "is not an alphanumeric string (no spaces or special characters allowed)")
+                print("\""+final_answer+"\"", "is not an alphanumeric string (no spaces or special characters allowed)\n")
 
     # if windows friendly symbols
     elif restricted_only:
@@ -94,7 +124,7 @@ def get_str_descision(prompt_question, alpha_only=False, alnum_only=False, restr
             for c in final_answer:
                 if c not in valid_chars:
                     print("\""+final_answer+"\"", "contains illegal char \""+c+"\"", \
-                          "Must be an alphanumeric string containing only _ or . special chars and no spaces")
+                          "Must be an alphanumeric string containing only _ or . special chars and no spaces\n")
             break
 
     # anything
@@ -117,4 +147,4 @@ def get_restricted_descision(prompt_question, allowed_strings_list):
             return descision
 
         else:
-            print("\""+descision+"\"", "unrecognised. Must be one of either:", allowed_strings_list)
+            print("\""+descision+"\"", "unrecognised. Must be one of either:", allowed_strings_list, "\n")

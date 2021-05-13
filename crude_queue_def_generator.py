@@ -77,10 +77,10 @@ class Generator():
             ## get switch ID
             switch_id = -1
             if (not provided_id_list) and (switch == 0):  # if there was no provided ID list then we make sure there is a controller (at ID 0)
-                print("Using switch ID: 0 for first switch")
+                print("Using Switch ID: 0 for first switch")
                 switch_id = 0
             elif not provided_id_list:  # otherwise ask the user for an ID to use for this switch
-                switch_id = gen_utils.get_int_descision("What is the ID for Switch "+str(switch)+"?")
+                switch_id = gen_utils.get_int_descision("What is the ID for Switch "+str(switch)+"?", 0)  # +ve
             else:  # else the ID list is provided
                 switch_id = int(id_list[switch])
 
@@ -187,7 +187,7 @@ class Generator():
 ################### FOR  DEBUG ###################
 ##################################################
 
-# fn = "simulator_files\M_queue_definition.xml"
+# fn = "simulator_files\\M_queue_definition.xml"
 # idlist = [0, 10, 100, 1000]
 # allowed_words = ["FIFO", "HTML"]
 # generate(fn, max_nodes=100, id_list=idlist, allowed_schedules=allowed_words)

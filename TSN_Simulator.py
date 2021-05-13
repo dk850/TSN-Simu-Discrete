@@ -5,7 +5,7 @@ Specify file locations for neccesay files (Network Topo, Traffic Definition, GCL
 """
 
 ##################################################
-##################### IMPORT #####################
+############## IMPORT AND VARIABLES ##############
 ##################################################
 
 # libraries
@@ -16,24 +16,38 @@ from lxml import etree
 import generator_utilities as gen_utils
 import crude_topo_generator as network_topo_gen  # network topology generator
 import crude_queue_def_generator as queue_def_gen  # queue definition generator
+import crude_traffic_def_generator as traffic_def_gen  # traffic definition generator
 # GCL should be made manually ahdering to standards in the UML diagrams -> T(digit){-T(digit)} (8-bits)
 
-
-
-
-## global variables
-MAX_NODE_COUNT = 100
-MAX_TRAFFIC_COUNT = 1000
-
-e_es_types = ["sensor", "control"]  # possible end station types
-e_queue_schedules = ["FIFO"]  # possible queue schedules
-e_queue_type_names = ["ST", "Emergency", "Sporadic_Hard", "Sporadic_Soft", "BE"]  # possible queue types
-
-
+# global variables
 g_generic_traffics_list = []  # list of generic traffics from file in the form of dicts NOT traffic objects
 g_node_id_dict = {}  # key is node id, value is node object
 g_offline_GCL = {}  # key is timestamp, value is the gate state at that timestamp
 # should only change gate state if we have a key for that timestamp, else leave it as previous value
+
+
+
+
+##################################################
+################# USER  SETTINGS #################
+##################################################
+
+# global variables to set
+MAX_NODE_COUNT = 100
+MAX_TRAFFIC_COUNT = 1000
+
+# global enums
+e_es_types = ["sensor", "control"]  # possible end station types
+e_queue_schedules = ["FIFO"]  # possible queue schedules
+e_queue_type_names = ["ST", "Emergency", "Sporadic_Hard", "Sporadic_Soft", "BE"]  # possible queue types
+
+# specify file paths and names
+# TODO : Have option to input file name if none provided here
+files_directory       = "simulator_files\\"
+network_topo_file       = files_directory+"example_network_topology.xml"
+queue_definition_file   = files_directory+"example_queue_definition.xml"
+GCL_file                = files_directory+"example_gcl.txt"
+traffic_definition_file = files_directory+"example_traffic_definition.xml"
 
 
 
@@ -311,45 +325,42 @@ class Queue:
 ##################################################
 
 ## HELPERS
-# function to bulk parse all inputs
+# main function to bulk parse all inputs from file paths defined under  ### USER SETTINGS ###
 def bullk_parse(network_topo_file, queue_definition_file, GCL_file, traffic_definition_file):
 
     # network topo
     n_topo_return_value = network_topo_parse_wrapper(network_topo_file)
     if n_topo_return_value == 0:
         return 0
-    elif type(n_topo_return_value) is tuple:  # else if there is a filename change
-        network_topo_file = n_topo_return_value[0]
+
+    # else if there is a filename change
+    elif type(n_topo_return_value) is tuple:
+        network_topo_file = n_topo_return_value[0]  # update current filename for routing table parse
         if n_topo_return_value[1] == 0:  # if it still failed
             return 0
+
 
     # routing table
     if routing_table_parse_wrapper(network_topo_file) == 0:
         return 0
 
+
     # GCL
     if GCL_parse_wrapper(GCL_file) == 0:
         return 0
+
 
     # queue definition
     if queue_def_parse_wrapper(queue_definition_file) == 0:
         return 0
 
 
-
-    # parse the generic types of traffic our simulator will be able to send
-    f = Path(traffic_definition_file)
-    if f.is_file():
-        if parse_traffic_definition(traffic_definition_file) == 0:
-            print("ERROR: In file:", "\""+traffic_definition_file+"\"")
-            return 0
-        else:
-            print("Successfully parsed traffic definition file:", "\""+traffic_definition_file+"\"")
-    else:
-        print("ERROR: Traffic definition not found:", "\""+traffic_definition_file+"\"")
+    # traffic definition
+    if traffic_parse_wrapper(traffic_definition_file) == 0:
         return 0
 
 
+    # all success
     return 1
 
 
@@ -987,7 +998,7 @@ def network_topo_parse_wrapper(network_topo_file):
         elif gen_utils.get_YesNo_descision("Would you like to look for a different Topology filename?"):
             new_filename = "simulator_files\\"
             new_filename += gen_utils.get_str_descision("Enter a filename for the Network Topology (do NOT include .xml)", \
-                                                       restricted_only=True)
+                                                        restricted_only=True)
             new_filename += ".xml"
             print("Trying filename: \""+new_filename+"\"")
             return (new_filename, network_topo_parse_wrapper(new_filename))
@@ -1037,6 +1048,9 @@ def GCL_parse_wrapper(GCL_file):
                                                         restricted_only=True)
             print("Trying filename: \""+new_filename+"\"")
             return GCL_parse_wrapper(new_filename)
+
+        # else
+        print("ERROR: Cannot run simulator without a valid GCL file")
         return 0
 
 
@@ -1110,19 +1124,60 @@ def queue_def_parse_wrapper(queue_definition_file):
 
 
 
+# GCL parser wrapper
+def traffic_parse_wrapper(traffic_definition_file):
+
+    # parse the generic types of traffic our simulator will be able to send
+    f = Path(traffic_definition_file)
+    if f.is_file():
+        if parse_traffic_definition(traffic_definition_file) == 0:  # syntax error
+            print("ERROR: In file:", "\""+traffic_definition_file+"\"")
+            return 0
+        else:
+            print("Successfully parsed traffic definition file:", "\""+traffic_definition_file+"\"")
+            return 1
+    else:
+        print("ERROR: Traffic definition not found:", "\""+traffic_definition_file+"\"")
+
+        # see if user wants to create a new file
+        if gen_utils.get_YesNo_descision("Would you like to create a new Traffic Definition?"):
+
+            # see if user wants to change the filename
+            if gen_utils.get_YesNo_descision("Would you like to use the current filename ("+traffic_definition_file+")?"):
+                traffic_def_gen.generate(traffic_definition_file)  # generate
+                return traffic_parse_wrapper(traffic_definition_file)  # attempt to re-parse
+
+            else:  # get new filename
+                new_filename = "simulator_files\\"
+                new_filename += gen_utils.get_str_descision("Enter a filename for the Queue Definition file (do NOT include .xml)", \
+                                                            restricted_only=True)
+                new_filename += ".xml"
+                print("Accepted filename:", new_filename)
+
+                traffic_def_gen.generate(new_filename)  # generate
+                return traffic_parse_wrapper(new_filename)  # attempt to re-parse
+
+
+        # if user doesnt want to create a new one - see if they want to search for a different one
+        elif gen_utils.get_YesNo_descision("Would you like to look for a different Traffic Definition filename?"):
+            new_filename = "simulator_files\\"
+            new_filename += gen_utils.get_str_descision("Enter a filename for the Traffic Definition (do NOT include .xml)", \
+                                                        restricted_only=True)
+            new_filename += ".xml"
+            print("Trying filename: \""+new_filename+"\"")
+            return traffic_parse_wrapper(new_filename)  # dont need to return the new filename as nothing else needs it
+
+
+        # else
+        print("ERROR: Cannot run simulator without a valid Traffic Definition file")
+        return 0
+
+
+
 
 ##################################################
 ######## GET INPUT FILES OR GENERATE THEM ########
 ##################################################
-# TODO : Have option to input file name if none provided here,
-#        or to generate a new file via a crude generator script
-# TODO : This should probably be a function or in another script
-
-# specify file paths and names
-network_topo_file       = "simulator_files\\example_network_topology.xml"
-queue_definition_file   = "simulator_files\\example_queue_definition.xml"
-GCL_file                = "simulator_files\\example_gcl.txt"
-traffic_definition_file = "simulator_files\\example_traffic_definition.xml"
 
 if bullk_parse(network_topo_file, queue_definition_file, GCL_file, traffic_definition_file) == 0:
     print("FAILED TO PARSE FILES")
