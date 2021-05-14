@@ -1,4 +1,5 @@
 # TSN_Project
 Building the TSN simulator in Python 3.9
 
-The topology generator can be ran on its own to generate a compatible network topology for the simulator
+Any of the generators can be ran/called as standalone to generate compatible files for the simulator
+The Simulator will allow you to build files before running if any are missing
