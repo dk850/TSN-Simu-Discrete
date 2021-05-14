@@ -57,7 +57,7 @@ traffic_definition_file = files_directory+"example_traffic_definition.xml"
 ##################################################
 
 # node base class
-class Node:
+class Node():
 
     def __init__(self, id, name="unnamed"):
         self.node_type = str(self.__class__.__name__)  # this will be the same as the class name for each node
@@ -68,7 +68,19 @@ class Node:
 
 
     def to_string(self):
-        return str(self.node_type+" (ID: "+str(self.id)+") "+str(self.name))
+        # node type
+        output_str = str(self.node_type)
+
+        # formatting
+        if self.node_type == "Controller":
+            output_str += " "
+        if self.node_type == "Switch":
+            output_str += "     "
+
+        # attributes
+        output_str += " (ID: "+str(self.id)+") (Name: "+str(self.name)+")"
+
+        return output_str
 
 
 
@@ -244,7 +256,7 @@ class Best_Effort(NonST):
 ##################################################
 
 # queue class (should be present in each switch)
-class Queue:
+class Queue():
     def __init__(self, ST_count, emergency_count, sporadic_hard_count, sporadic_soft_count, BE_count, \
                  ST_schedule=e_queue_schedules[0], emergency_schedule=e_queue_schedules[0], \
                  sporadic_hard_schedule=e_queue_schedules[0], sporadic_soft_schedule=e_queue_schedules[0], \
@@ -275,6 +287,7 @@ class Queue:
 
     # makes sure that the frame is set up correctly and passes the acceptance test
     def acceptance_test(self, frame):
+        # dummy function
         return True
 
 
@@ -287,10 +300,10 @@ class Queue:
 
 
     def to_string(self):
-        out_str = "QUEUE DEFINITION:"
+        out_str = ""
 
-        # print queue types
-        out_str += "\nST_Count: "+str(self.ST_count)
+        # print queue types with some formatting
+        out_str += "ST_Count: "+str(self.ST_count)
         out_str += "\nST_schedule: "+str(self.ST_schedule)
         out_str += "\nemergency_count: "+str(self.emergency_count)
         out_str += "\nemergency_schedule: "+str(self.emergency_schedule)
@@ -1180,7 +1193,7 @@ def traffic_parse_wrapper(traffic_definition_file):
 ##################################################
 
 if bullk_parse(network_topo_file, queue_definition_file, GCL_file, traffic_definition_file) == 0:
-    print("FAILED TO PARSE FILES")
+    print("CRITICAL ERROR: Failed to parse files")
     exit()
 
 
@@ -1191,18 +1204,37 @@ if bullk_parse(network_topo_file, queue_definition_file, GCL_file, traffic_defin
 ##################################################
 
 print()
-print("TEST START")
+
+# print traffic types
+print("Defined Traffic types from XML (differentiated by \"unique_id\"):")
+for traffic in g_generic_traffics_list:
+    print(traffic)
 print()
 
-print(g_node_id_dict[0].to_string())
-print("TYPE:", g_node_id_dict[0].node_type)
-print("rtable for Controller id 0:", g_node_id_dict[0].local_routing_table)
+# print nodes
+print("Nodes from XML:")
+for node in g_node_id_dict:
+    print(g_node_id_dict[node].to_string())
 print()
+
+
+# # print GCL
+# print("GCL from file:")
+# for timestamp in g_offline_GCL:
+#    print(timestamp, g_offline_GCL[timestamp])
+# print()
+
+# print an example queue type
+print("Queue type example for ID 0:")
 print(g_node_id_dict[0].queue_definition.to_string())
-
-
 print()
-print("TEST END")
+
+# print routing table
+print("Routing table parsed from network topology:")
+for switch_node in g_node_id_dict[0].routing_table:
+    print(switch_node, g_node_id_dict[0].routing_table[switch_node])
+print()
+
 
 
 
