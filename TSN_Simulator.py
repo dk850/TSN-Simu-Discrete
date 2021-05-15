@@ -20,6 +20,7 @@ import crude_traffic_def_generator as traffic_def_gen  # traffic definition gene
 # GCL should be made manually ahdering to standards in the UML diagrams -> T(digit){-T(digit)} (8-bits)
 
 # global variables
+g_timestamp = 0
 g_generic_traffics_list = []  # list of generic traffics from file in the form of dicts NOT traffic objects
 g_node_id_dict = {}  # key is node id, value is node object
 g_offline_GCL = {}  # key is timestamp, value is the gate state at that timestamp
@@ -69,7 +70,7 @@ class Node():
 
     def to_string(self):
         # node type
-        output_str = str(self.node_type)
+        output_str = str(self.node_type) + ":"
 
         # formatting
         if self.node_type == "Controller":
@@ -78,7 +79,11 @@ class Node():
             output_str += "     "
 
         # attributes
-        output_str += " (ID: "+str(self.id)+") (Name: "+str(self.name)+")"
+        output_str += " (ID: "+str(self.id)+") (Name: "+str(self.name)+") "
+
+        # display traffic gen paramerters
+        if self.node_type == "End_Station":
+            output_str += str(self.packet.to_string())
 
         return output_str
 
@@ -90,12 +95,13 @@ class End_Station(Node):
     def __init__(self, id, name="unnamed"):
         super().__init__(id, name)
         self.type = e_es_types[0]  # default
+        self.packet = 0  # to hold packet details before the generator sends them
 
 
     # function to send traffic from this node to a destination described in the traffic object it is sending
     def send(self, send_t):
         # TODO : error check make sure that send_t is a traffic object
-        print("adding traffic", "\""+send_t+"\"", "to egress queue")
+        print("adding traffic", "\""+str(send_t)+"\"", "to egress queue")
         self.egress_traffic.append(send_t)
 
 
@@ -104,6 +110,47 @@ class End_Station(Node):
         # maybe if ingress queue not empty do something here as a way of looping
         print("Received")
         pass
+
+
+    def set_traffic_gen(self, rules):
+
+        if 1:
+            for entry in rules:
+                print(entry+":", rules[entry])
+
+        # extract shared attributess
+        t_name = rules["name"]
+        t_offset = rules["offset"]
+        t_type = rules["type"]
+
+        # if it is ST
+        if t_type == "ST":
+            t_period = rules["period"]
+            t_deadline = rules["hard_deadline"]
+            t_delay_jitter = rules["max_release_jitter"]
+
+            # set ST traffic
+            dest = 4  # temp
+            self.packet = ST(self.id, dest, t_delay_jitter, t_period, t_deadline, t_name, t_offset)
+
+
+    def advance(self):  # advance discrete state of end station by 1
+
+        # if it is packet generation time
+        if g_timestamp % self.packet.period == 0:  # if ST we send on every period
+            self.send(self.packet)
+
+
+
+        # at end, check the egress queue for stuff to send
+        if len(self.egress_traffic) != 0:
+            print(len(self.egress_traffic), self.egress_traffic[0])  # end stations are FIFO
+
+            #print(self.)
+
+
+
+
 
 
     ## setters
@@ -185,6 +232,12 @@ class Traffic():
         self.destination = destination  # list. May not need to be initialised
 
 
+    # setters
+    def set_dest(self, dest):
+        self.destination = dest
+
+
+
 
 # define packets that belong to the traffic class (frame -> packet -> traffic)
 # TODO : may need to have data in here somehow, or in frames
@@ -192,8 +245,11 @@ class Packet(Traffic):
 
     def __init__(self, source, destination, priority, name="unnamed", offset="0"):
         super().__init__(source, destination)
-        self.arrival_time = 0.0  # TODO : set this to the NOW timestamp
-        self.transmission_time = -1.0  # this is changed upon successful transmission from the node when it leaves the queue
+        self.arrival_time = -1  # this is changed upon successful transmission from the node when it leaves the queue
+        self.transmission_time = g_timestamp
+        self.priority = priority
+        self.offset = offset
+
 
 
 
@@ -201,12 +257,25 @@ class Packet(Traffic):
 class ST(Packet):
     # for this type of traffic we use the GCL so need to show this somehow
 
-    def __init__(self, source, destination, priority, delay_jitter_constraints, period, deadline, \
+    def __init__(self, source, destination, delay_jitter_constraints, period, deadline, \
                  name="unnamed", offset="0"):
         super().__init__(source, destination, 1, name, offset)  # priority 1
-        self.delay_jitter_constraints = delay_jitter_constraints
-        self.period = period
-        self.hard_deadline = deadline
+        self.delay_jitter_constraints = int(delay_jitter_constraints)
+        self.period = int(period)
+        self.hard_deadline = int(deadline)
+
+
+    def to_string(self):
+        output_str = "Packet Definition: "
+        output_str += "(Type: " + str(self.__class__.__name__)
+        output_str += ") (Source: " + str(self.source)
+        output_str += ") (Priority: " + str(self.priority)
+        output_str += ") (Deadline: " + str(self.hard_deadline)
+        output_str += ") (Period: " + str(self.period)
+        output_str += ") (Jitter: " + str(self.delay_jitter_constraints)
+        output_str += ")"
+
+        return output_str
 
 
 
@@ -224,7 +293,7 @@ class NonST(Packet):
 # sporadic hard type of nonST traffic
 class Sporadic_Hard(NonST):
 
-    def __init__(self, source, destination, priority, minimal_inter_release_time, delay_jitter_constraints, \
+    def __init__(self, source, destination, minimal_inter_release_time, delay_jitter_constraints, \
                  deadline, name="unnamed", offset="0"):
         super().__init__(source, destination, 2, minimal_inter_release_time, delay_jitter_constraints, name, offset)  # priority 2
         self.hard_deadline = deadline
@@ -234,7 +303,7 @@ class Sporadic_Hard(NonST):
 # sporadic soft type of nonST traffic
 class Sporadic_Soft(NonST):
 
-    def __init__(self, source, destination, priority, minimal_inter_release_time, delay_jitter_constraints, \
+    def __init__(self, source, destination, minimal_inter_release_time, delay_jitter_constraints, \
                  deadline, name="unnamed", offset="0"):
         super().__init__(source, destination, 3, minimal_inter_release_time, delay_jitter_constraints, name, offset)  # priority 3
         self.soft_deadline = deadline
@@ -244,7 +313,7 @@ class Sporadic_Soft(NonST):
 # best effort type of nonST traffic
 class Best_Effort(NonST):
 
-    def __init__(self, source, destination, priority, minimal_inter_release_time, delay_jitter_constraints, \
+    def __init__(self, source, destination, minimal_inter_release_time, delay_jitter_constraints, \
                  name="unnamed", offset="0"):
         super().__init__(source, destination, 4, minimal_inter_release_time, delay_jitter_constraints, name, offset)  # priority 4
 
@@ -334,7 +403,7 @@ class Queue():
 
 
 ##################################################
-############# PARSE INPUTS FUNCTIONS #############
+############# INOUT PARSER FUNCTIONS #############
 ##################################################
 
 ## HELPERS
@@ -1189,12 +1258,36 @@ def traffic_parse_wrapper(traffic_definition_file):
 
 
 ##################################################
-######## GET INPUT FILES OR GENERATE THEM ########
+################# SIMULATOR CODE #################
 ##################################################
 
+# parse files
 if bullk_parse(network_topo_file, queue_definition_file, GCL_file, traffic_definition_file) == 0:
     print("CRITICAL ERROR: Failed to parse files")
     exit()
+print()
+
+
+## Set up end stations
+# give end station 1 a periodic st traffic ID 0
+print([(i, g_generic_traffics_list[i]["type"]) for i in range(len(g_generic_traffics_list))])  # list of types
+
+
+# could list all end stations here then chose what traffic to apply to them over cli
+
+g_node_id_dict[1].set_traffic_gen(g_generic_traffics_list[0])
+
+print(g_node_id_dict[1].to_string())
+
+for i in range(1, 20):
+
+    g_node_id_dict[1].advance()
+
+    g_timestamp += 1
+
+epochs = 10000
+
+
 
 
 
@@ -1203,56 +1296,46 @@ if bullk_parse(network_topo_file, queue_definition_file, GCL_file, traffic_defin
 ################### DEBUG CODE ###################
 ##################################################
 
-print()
-
-# print traffic types
-print("Defined Traffic types from XML (differentiated by \"unique_id\"):")
-for traffic in g_generic_traffics_list:
-    print(traffic)
-print()
-
-# print nodes
-print("Nodes from XML:")
-for node in g_node_id_dict:
-    print(g_node_id_dict[node].to_string())
-print()
-
-
-# # print GCL
-# print("GCL from file:")
-# for timestamp in g_offline_GCL:
-#    print(timestamp, g_offline_GCL[timestamp])
-# print()
-
-# print an example queue type
-print("Queue type example for ID 0:")
-print(g_node_id_dict[0].queue_definition.to_string())
-print()
-
-# print routing table
-print("Routing table parsed from network topology:")
-for switch_node in g_node_id_dict[0].routing_table:
-    print(switch_node, g_node_id_dict[0].routing_table[switch_node])
-print()
 
 
 
 
 
+##################################################
+################### DEMO  CODE ###################
+##################################################
+
+if 0:
+    print()
+    print("DEMO CODE AS FOLLOWS:")
+    print()
+
+    # print traffic types
+    print("Defined Traffic types from XML (differentiated by \"unique_id\"):")
+    for traffic in g_generic_traffics_list:
+        print(traffic)
+    print()
+
+    # print nodes
+    print("Nodes from XML:")
+    for node in g_node_id_dict:
+        print(g_node_id_dict[node].to_string())
+    print()
 
 
+    # # print GCL
+    # print("GCL from file:")
+    # for timestamp in g_offline_GCL:
+    #    print(timestamp, g_offline_GCL[timestamp])
+    # print()
 
+    # print an example queue type
+    print("Queue definition for Switch ID 0:")
+    print(g_node_id_dict[0].queue_definition.to_string())
+    print()
 
-
-
-
-
-
-
-
-
-
-
-
-
-# whitespace
+    # print routing table
+    print("Routing table parsed from network topology:")
+    for switch_node in g_node_id_dict[0].routing_table:
+        print(switch_node, g_node_id_dict[0].routing_table[switch_node])
+    print()

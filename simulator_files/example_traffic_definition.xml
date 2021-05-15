@@ -1,6 +1,6 @@
 <Traffic_Definition_Root>
     <Traffic unique_id="0" name="generic_st">
-        <ST hard_deadline="20.5" max_release_jitter="0.1" period="80"/>
+        <ST hard_deadline="25" max_release_jitter="1" period="10"/>
     </Traffic>
     <Traffic unique_id="5" name="generic_sh">
         <Sporadic_Hard hard_deadline="100" max_release_jitter="5" min_inter_release="50" />
