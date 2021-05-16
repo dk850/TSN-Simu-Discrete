@@ -21,7 +21,7 @@ import crude_traffic_def_generator as traffic_def_gen  # traffic definition gene
 
 # global variables
 g_timestamp = 0
-g_generic_traffics_list = []  # list of generic traffics from file in the form of dicts NOT traffic objects
+g_generic_traffics_dict = {}  # dictionary of generic traffic rules from file - key is ID
 g_node_id_dict = {}  # key is node id, value is node object
 g_offline_GCL = {}  # key is timestamp, value is the gate state at that timestamp
 # should only change gate state if we have a key for that timestamp, else leave it as previous value
@@ -44,11 +44,13 @@ e_queue_type_names = ["ST", "Emergency", "Sporadic_Hard", "Sporadic_Soft", "BE"]
 
 # specify file paths and names
 # TODO : Have option to input file name if none provided here
+using = "example"
+using = "M"
 files_directory       = "simulator_files\\"
-network_topo_file       = files_directory+"example_network_topology.xml"
-queue_definition_file   = files_directory+"example_queue_definition.xml"
-GCL_file                = files_directory+"example_gcl.txt"
-traffic_definition_file = files_directory+"example_traffic_definition.xml"
+network_topo_file       = files_directory+using+"_network_topology.xml"
+queue_definition_file   = files_directory+using+"_queue_definition.xml"
+GCL_file                = files_directory+using+"_gcl.txt"
+traffic_definition_file = files_directory+using+"_traffic_definition.xml"
 
 
 
@@ -112,26 +114,24 @@ class End_Station(Node):
         pass
 
 
-    def set_traffic_gen(self, rules):
+    def set_traffic_rules(self, rules):
 
-        if 1:
+        if 1:  # for debugging
+            print("Rule properties:")
             for entry in rules:
                 print(entry+":", rules[entry])
+            print()
 
         # extract shared attributess
-        t_name = rules["name"]
-        t_offset = rules["offset"]
-        t_type = rules["type"]
+        self.t_name = rules["name"]
+        self.t_offset = rules["offset"]
+        self.t_type = rules["type"]
 
-        # if it is ST
-        if t_type == "ST":
-            t_period = rules["period"]
-            t_deadline = rules["hard_deadline"]
-            t_delay_jitter = rules["max_release_jitter"]
-
-            # set ST traffic
-            dest = 4  # temp
-            self.packet = ST(self.id, dest, t_delay_jitter, t_period, t_deadline, t_name, t_offset)
+        # extract ST attributes
+        if self.t_type == "ST":
+            self.t_period = rules["period"]
+            self.t_deadline = rules["hard_deadline"]
+            self.t_delay_jitter = rules["max_release_jitter"]
 
 
     def advance(self):  # advance discrete state of end station by 1
@@ -144,8 +144,8 @@ class End_Station(Node):
 
         # at end, check the egress queue for stuff to send
         if len(self.egress_traffic) != 0:
-            print(len(self.egress_traffic), self.egress_traffic[0])  # end stations are FIFO
-
+            #print(len(self.egress_traffic), self.egress_traffic[0])  # end stations are FIFO
+            pass
             #print(self.)
 
 
@@ -931,9 +931,12 @@ def parse_traffic_definition(f_traffic_def, debug=0):
             print("ERROR: Traffic (ID:", child.get("unique_id")+") has incorrect number of children")
             return 0
 
+        # build dict entry
+        traffic_type = {}
+        traffic_type["offset"] = int(child.get("offset"))
+        traffic_type["name"] = str(child.get("name"))
 
         # deal with specific traffic types and prepare objects for the child
-        traffic_type = {}
         if child[0].tag == traffic_types[0]:  # ST Traffic
             max_release_jitter = 0.0
             hard_deadline = 0.0
@@ -1036,10 +1039,7 @@ def parse_traffic_definition(f_traffic_def, debug=0):
 
 
         # continue building the dict and then add it to the global list of generic types
-        traffic_type["unique_id"] = int(child.get("unique_id"))
-        traffic_type["offset"] = int(child.get("offset"))
-        traffic_type["name"] = str(child.get("name"))
-        g_generic_traffics_list.append(traffic_type)
+        g_generic_traffics_dict[child.get("unique_id")] = traffic_type
 
     return 1
 
@@ -1171,8 +1171,11 @@ def queue_def_parse_wrapper(queue_definition_file):
             # see if the user wants to use the current switch ID list from the network topo for simplicity
             if gen_utils.get_YesNo_descision("Would you like to use the current switch IDs from the Network Topology?"):
 
-                # get list of IDs into a list()
-                id_list_to_send = [key for key in g_node_id_dict]
+                # get list of controller and switch IDs into a list()
+                id_list_to_send = []
+                for key in g_node_id_dict:
+                    if g_node_id_dict[key].node_type != "End_Station":
+                        id_list_to_send.append(key)
 
                 if new_filename_in_use:  # call queue def generator with new filename and current IDs and try to reparse
                     queue_def_gen.generate(new_filename, MAX_NODE_COUNT, id_list_to_send, e_queue_schedules)
@@ -1269,19 +1272,22 @@ print()
 
 
 ## Set up end stations
-# give end station 1 a periodic st traffic ID 0
-print([(i, g_generic_traffics_list[i]["type"]) for i in range(len(g_generic_traffics_list))])  # list of types
+print("Available Traffic types from the Traffic Definition File and their ID:")
+print([(key_id, g_generic_traffics_dict[key_id]["type"]) for key_id in g_generic_traffics_dict])
+
+# ask user which end station gets which traffic ruleset
+traffic_ids = [id for id in g_generic_traffics_dict]  # get list of just the ID
+for node_id in g_node_id_dict:
+    if g_node_id_dict[node_id].node_type == "End_Station":  # get end station from global id list
+        t_id = gen_utils.get_restricted_descision("What generic Traffic ID should End_Station (ID: "+str(node_id)+")"+" get?", traffic_ids)
+        g_node_id_dict[node_id].set_traffic_rules(g_generic_traffics_dict[t_id])
 
 
-# could list all end stations here then chose what traffic to apply to them over cli
-
-g_node_id_dict[1].set_traffic_gen(g_generic_traffics_list[0])
-
-print(g_node_id_dict[1].to_string())
+#print(g_node_id_dict[1].to_string())
 
 for i in range(1, 20):
 
-    g_node_id_dict[1].advance()
+    #g_node_id_dict[1].advance()
 
     g_timestamp += 1
 
