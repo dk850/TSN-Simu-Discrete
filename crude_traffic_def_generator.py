@@ -18,7 +18,7 @@ import generator_utilities as gen_utils
 ##################################################
 
 # wrapper to call generator class for use outside of this script
-def generate(filename, allow_naming=True, allow_offset=True):
+def generate(filename, allow_naming=True, allow_offset=True, allow_dest=True):
 
     # if allow_naming allowed (Default), ask the user if they want to name their nodes
     if allow_naming:
@@ -33,8 +33,15 @@ def generate(filename, allow_naming=True, allow_offset=True):
     else:
         offset_set_mode = False
 
+    # if allow_dest allowed (Default), ask the user if they want to be able to statically set destinations
+    if allow_dest:
+        dest_set_mode = gen_utils.get_YesNo_descision("Do you wish to be able to set the destinations of any Traffics about to be defined?"\
+                                                      + " (Else it will default to a random End Station)")
+    else:
+        dest_set_mode = False
+
     # begin generation
-    Generator(filename, node_name_mode, offset_set_mode)
+    Generator(filename, node_name_mode, offset_set_mode, dest_set_mode)
 
 
 
@@ -45,7 +52,7 @@ def generate(filename, allow_naming=True, allow_offset=True):
 
 class Generator():
 
-    def __init__(self, filename, node_name_mode, offset_set_mode):
+    def __init__(self, filename, node_name_mode, offset_set_mode, dest_set_mode):
 
         queue_types = ["ST", "Sporadic_Hard", "Sporadic_Soft", "BE"]  # possible queue types for later
 
@@ -89,10 +96,20 @@ class Generator():
             else:
                 traffic_offset = "0"  # else default to 0
 
+            # if we are allowed to set a destination set that here too
+            if dest_set_mode:
+                dest = str(gen_utils.get_int_descision("Input destination for Traffic " + \
+                                                       str(traffic_id)+" (0 for random)", 0))
+            else:
+                # 0 can never be an end station as it is always the controller so this signifies random
+                dest = "0"  # default to 0
+
+
             # set this Traffic Definition base attributes
             t_ele.set("unique_id", str(traffic_id))
             t_ele.set("name", str(traffic_name))
             t_ele.set("offset", str(traffic_offset))
+            t_ele.set("destination_id", str(dest))
 
 
             ## determine what type of traffic this queue is for

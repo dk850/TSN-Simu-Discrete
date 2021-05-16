@@ -97,7 +97,7 @@ class End_Station(Node):
     def __init__(self, id, name="unnamed"):
         super().__init__(id, name)
         self.type = e_es_types[0]  # default
-        self.packet = 0  # to hold packet details before the generator sends them
+        #self.packet = 0  # to hold packet details before the generator sends them
 
 
     # function to send traffic from this node to a destination described in the traffic object it is sending
@@ -134,11 +134,16 @@ class End_Station(Node):
             self.t_delay_jitter = rules["max_release_jitter"]
 
 
-    def advance(self):  # advance discrete state of end station by 1
+    def check_to_send(self):  # check if it is packet generation time and put new packet in egress
 
-        # if it is packet generation time
-        if g_timestamp % self.packet.period == 0:  # if ST we send on every period
-            self.send(self.packet)
+        # determine type as ST generates differently
+        if self.t_type == "ST":
+            #__init__(self, source, destination, delay_jitter_constraints, period, deadline, \
+            #             name="unnamed", offset="0"):
+            if g_timestamp % self.t_period == 0:  # if are at its period
+                # generate new packet
+                packet = ST(self.id, )
+                self.send(self.packet)
 
 
 
@@ -920,12 +925,26 @@ def parse_traffic_definition(f_traffic_def, debug=0):
             if debug:
                 print("Child ID:", child.get("unique_id"), "has no \"name\" attribute. Defaulting to \"unnamed\"")
             child.set("name", "unnamed")
-        if "offset" not in child.keys():  # check for a name attribute
+        if "offset" not in child.keys():  # check for an offset attribute
             if debug:
                 print("Child ID:", child.get("unique_id"), "has no \"offset\" attribute. Defaulting to \"0\"")
             child.set("offset", "0")
-        if len(child.keys()) != 3:  # traffic should only have 3 attributes. "unique_id", "name" and "offset"
-            print("ERROR: Traffic (ID:", child.get("unique_id")+")", "has incorrect amount of attributes (should be 3)")
+        if "destination_id" not in child.keys():  # check for a destination attribute
+            if debug:
+                print("Child ID:", child.get("unique_id"), "has no \"destination_id\" attribute. Defaulting to \"0\"")
+            child.set("destination_id", "0")
+        if child.get("destination_id") != "0":  # destination id should be the id of one of the end points or 0
+            if int(child.get("destination_id")) not in g_node_id_dict:  # if its missing from all IDs fail
+                print(child.get("destination_id"), "not in", g_node_id_dict)
+                print("ERROR: Traffic (ID:", child.get("unique_id")+")", "has destination_id: \"" + \
+                      str(child.get("destination_id"))+"\"", "which does not match an End Station")
+                return 0
+            if g_node_id_dict[int(child.get("destination_id"))].node_type != "End_Station":  # node must be end station
+                print("ERROR: Traffic (ID:", child.get("unique_id")+")", "has destination_id: \"" + \
+                      str(child.get("destination_id"))+"\"", "which does not match an End Station")
+                return 0
+        if len(child.keys()) != 4:  # traffic should only have 4 attributes. "unique_id", "name" "offset" and "destination_id"
+            print("ERROR: Traffic (ID:", child.get("unique_id")+")", "has incorrect amount of attributes (should be 4)")
             return 0
         if len(child) != 1:  # traffic should only have 1 child, the type of traffic it is
             print("ERROR: Traffic (ID:", child.get("unique_id")+") has incorrect number of children")
@@ -935,6 +954,7 @@ def parse_traffic_definition(f_traffic_def, debug=0):
         traffic_type = {}
         traffic_type["offset"] = int(child.get("offset"))
         traffic_type["name"] = str(child.get("name"))
+        traffic_type["destination_id"] = str(child.get("destination_id"))
 
         # deal with specific traffic types and prepare objects for the child
         if child[0].tag == traffic_types[0]:  # ST Traffic
@@ -1272,21 +1292,33 @@ print()
 
 
 ## Set up end stations
+# display traffic types, id and destination
 print("Available Traffic types from the Traffic Definition File and their ID:")
-print([(key_id, g_generic_traffics_dict[key_id]["type"]) for key_id in g_generic_traffics_dict])
+print([("ID: "+str(key_id), "Type: "+str(g_generic_traffics_dict[key_id]["type"]), \
+        "Dest: "+str(g_generic_traffics_dict[key_id]["destination_id"])) \
+       for key_id in g_generic_traffics_dict])
 
 # ask user which end station gets which traffic ruleset
 traffic_ids = [id for id in g_generic_traffics_dict]  # get list of just the ID
+es_ids = []
+switch_ids = []
 for node_id in g_node_id_dict:
     if g_node_id_dict[node_id].node_type == "End_Station":  # get end station from global id list
         t_id = gen_utils.get_restricted_descision("What generic Traffic ID should End_Station (ID: "+str(node_id)+")"+" get?", traffic_ids)
         g_node_id_dict[node_id].set_traffic_rules(g_generic_traffics_dict[t_id])
+        es_ids.append(node_id)
+    else:
+        switch_ids.append(node_id)  # if not ES then node is Switch
 
 
-#print(g_node_id_dict[1].to_string())
+## Begin Simulator
+# timestamp initialised at 0 at top of file
+max_timestamp = 20  # TODO : ask the user here when finished debugging gen_utils.getInt...
+for i in range(1, max_timestamp):
 
-for i in range(1, 20):
-
+    # check each ES for traffic to send based on its traffic sending rules
+    for es in es_ids:
+        g_node_id_dict[es].check_to_send()
     #g_node_id_dict[1].advance()
 
     g_timestamp += 1
