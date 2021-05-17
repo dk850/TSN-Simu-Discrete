@@ -9,6 +9,7 @@ Specify file locations for neccesay files (Network Topo, Traffic Definition, GCL
 ##################################################
 
 # libraries
+import random
 from pathlib import Path
 from lxml import etree
 
@@ -24,7 +25,10 @@ g_timestamp = 0
 g_generic_traffics_dict = {}  # dictionary of generic traffic rules from file - key is ID
 g_node_id_dict = {}  # key is node id, value is node object
 g_offline_GCL = {}  # key is timestamp, value is the gate state at that timestamp
+g_current_GCL_state = ""  # state of GCL shared across entire simulator, to be changed according to GCL and timestamp
 # should only change gate state if we have a key for that timestamp, else leave it as previous value
+g_packet_latencies = []  # list to store a list of every packet latency
+g_queueing_delays = []
 
 
 
@@ -36,6 +40,7 @@ g_offline_GCL = {}  # key is timestamp, value is the gate state at that timestam
 # global variables to set
 MAX_NODE_COUNT = 100
 MAX_TRAFFIC_COUNT = 1000
+SIM_DEBUG = 1  # debug for simulator to see timestamps
 
 # global enums
 e_es_types = ["sensor", "control"]  # possible end station types
@@ -70,6 +75,10 @@ class Node():
         self.egress_traffic = []
 
 
+    def RX_packet(self, packet):
+        self.ingress_traffic.append(packet)
+
+
     def to_string(self):
         # node type
         output_str = str(self.node_type) + ":"
@@ -94,38 +103,113 @@ class Node():
 # end station type of node
 class End_Station(Node):
 
-    def __init__(self, id, name="unnamed"):
+    def __init__(self, id, parent_id, name="unnamed"):
         super().__init__(id, name)
         self.type = e_es_types[0]  # default
-        #self.packet = 0  # to hold packet details before the generator sends them
+        self.parent_id = int(parent_id)
 
 
-    # function to send traffic from this node to a destination described in the traffic object it is sending
-    def send(self, send_t):
-        # TODO : error check make sure that send_t is a traffic object
-        print("adding traffic", "\""+str(send_t)+"\"", "to egress queue")
-        self.egress_traffic.append(send_t)
+    # check if it is packet generation time and if so put new packet in egress
+    def check_to_generate(self):
+        # TODO : Add checks for other types of traffic (SH, SS, BE) and appropriate random generator functions
+
+        # determine type as ST generates differently
+        if self.t_type == "ST":
+            if g_timestamp % self.t_period == 0:  # if we are at its period
+
+                # generate new packet and add to egress
+                packet = ST(self.id, self.t_dest, self.t_delay_jitter, self.t_period, self.t_deadline,
+                            self.t_name, self.t_offset)
+                self.egress(packet)
+                if SIM_DEBUG:  # for debug
+                    print("[T", str(g_timestamp).zfill(3)+"]", "Adding newly generated", str(self.t_type), "packet", \
+                          "\""+str(packet.name)+"\"", "to egress queue of ES", "\""+str(self.id)+"\"")
+
+        return 1
 
 
-    # somehow loop this or it activates when traffic has been sent to this node
-    def on_receive(self):
-        # maybe if ingress queue not empty do something here as a way of looping
-        print("Received")
-        pass
+    # function to recieve packets in ingress queue
+    def digest_packets(self):
+        if len(self.ingress_traffic) == 0:  # do nothing if queue empty
+            return 0
+
+        # loop over all packets in ingress queue
+        for packet in self.ingress_traffic:
+            packet.set_arrival_time(g_timestamp)
+
+            if SIM_DEBUG:  # for debug
+                print("[T", str(g_timestamp).zfill(3)+"]", "Recieved", str(packet.__class__.__name__), "packet", \
+                      "\""+str(packet.name)+"\"", "from source ES", "\""+str(packet.source)+"\"", \
+                      "at final destination ES", "\""+str(self.id)+"\"", "with latency", \
+                      "\""+str(int(packet.arrival_time)-int(packet.transmission_time))+"\"")
+            g_packet_latencies.append(int(packet.arrival_time)-int(packet.transmission_time))  # add latency to list
+        self.ingress_traffic = []  # clear queue as we have ingested everything
+
+        return 1
 
 
+    # function to send all traffic from this nodes egress queue to parent switch
+    def flush_egress(self):
+        # should only be able to generate 1 packet at a time, but allow burst sending if we inform the user
+        if len(self.egress_traffic) > 1:
+            print("WARNING: Egress queue of ES:", str(self.id), "has length:", str(len(self.egress_traffic))+".", \
+                  "Burst sending all packets to parent Switch:", str(self.parent_id))
+
+        # burst send all packets to parent switch's ingress queue to be digested
+        for packet in self.egress_traffic:
+            if SIM_DEBUG:  # for debug
+                print("[T", str(g_timestamp).zfill(3)+"]", "Sending", str(packet.__class__.__name__), "Traffic", \
+                      "\""+str(packet.name)+"\"", "to parent Switch", "\""+str(self.parent_id)+"\"", \
+                      "from egress queue of ES", "\""+str(self.id)+"\"")
+
+            g_node_id_dict[self.parent_id].RX_packet(packet)
+        self.egress_traffic = []  # empty queue as we have sent all packets
+        return 1
+
+
+    # function to add a packet to the egress queue with error checking
+    def egress(self, packet):
+        # error check to make sure it is an actual traffic object
+        if packet.__class__.__bases__[0].__bases__[0].__name__ == "Traffic":  # PARENT of PARENT of packet
+            self.egress_traffic.append(packet)
+            return 1
+        else:
+            return 0
+
+
+    ## Setters
     def set_traffic_rules(self, rules):
+        # TODO : add other traffic types
 
-        if 1:  # for debugging
+        if 0:  # for debugging
             print("Rule properties:")
+            print("Source:", self.id)
             for entry in rules:
                 print(entry+":", rules[entry])
             print()
+
+        # erorr check destination
+        if str(rules["destination_id"]) == str(self.id):  # error check cant have destination be itself
+            print("CRITICAL ERROR: Cannot have Traffic rule destination_id be the same ID as the source in ES", \
+                  "\""+str(self.id)+"\"")
+            return 0
 
         # extract shared attributess
         self.t_name = rules["name"]
         self.t_offset = rules["offset"]
         self.t_type = rules["type"]
+        self.t_dest = rules["destination_id"]
+
+        # if destination_id is 0, we need to change it to a random ES ID
+        if int(self.t_dest) == 0:
+            # get list of end stations
+            es_list = []
+            for node in g_node_id_dict:
+                if g_node_id_dict[node].node_type == "End_Station":
+                    es_list.append(node)
+            es_list.remove(self.id)  # remove this end station
+            self.t_dest = str(random.choice(es_list))  # pick a random node from the list
+
 
         # extract ST attributes
         if self.t_type == "ST":
@@ -133,34 +217,12 @@ class End_Station(Node):
             self.t_deadline = rules["hard_deadline"]
             self.t_delay_jitter = rules["max_release_jitter"]
 
-
-    def check_to_send(self):  # check if it is packet generation time and put new packet in egress
-
-        # determine type as ST generates differently
-        if self.t_type == "ST":
-            #__init__(self, source, destination, delay_jitter_constraints, period, deadline, \
-            #             name="unnamed", offset="0"):
-            if g_timestamp % self.t_period == 0:  # if are at its period
-                # generate new packet
-                packet = ST(self.id, )
-                self.send(self.packet)
+        return 1
 
 
-
-        # at end, check the egress queue for stuff to send
-        if len(self.egress_traffic) != 0:
-            #print(len(self.egress_traffic), self.egress_traffic[0])  # end stations are FIFO
-            pass
-            #print(self.)
-
-
-
-
-
-
-    ## setters
     def set_type(self, type):
         self.type = type
+        return 1
 
 
 
@@ -169,33 +231,190 @@ class Switch(Node):
 
     def __init__(self, id, name="unnamed"):
         super().__init__(id, name)
+        self.available_packets = []
         self.packets_transmitted = 0
-        self.queue_delay = 0.0
+        self.total_queue_delay = 0
+        self.average_queue_delay = 0.0
         self.local_routing_table = -1  # to be set
-        self.queue_definition = -1  # to be set
 
-        # TODO : queue_def is parsed outside of this object and is of type queue, each switch can be different
+        # queues
+        self.queue_definition = -1  # to be set
+        self.ST_queue = []
+        self.EM_queue = []
+        self.SH_queue = []
+        self.SS_queue = []
+        self.BE_queue = []
+
+
+    # filters packets in the ingress queue into the relevant Traffic queue within the switch according to the queue_def
+    def ingress_packets(self):
+        # TODO : acceptance function somehow
+        # TODO : work out how to put traffics in different queues of same type
+
+        # if ingress queue is empty do nothing
+        if len(self.ingress_traffic) == 0:
+            return 0
+
+        # shuffle ingress to avoid ES bias if there is more than 1 packet
+        if len(self.ingress_traffic) > 1:
+            random.shuffle(self.ingress_traffic)
+
+        # each packet gets added to the relevant queue within the switch
+        final_ingress = self.ingress_traffic.copy()  # use a copy of this so we do not alter the live list when removing packets
+        for packet in self.ingress_traffic:
+            if SIM_DEBUG:  # debug
+                print("[T", str(g_timestamp).zfill(3)+"]", "Found", packet.__class__.__name__, "Traffic", "\""+str(packet.name)+"\"", \
+                      "from ES", "\""+str(packet.source)+"\"", "in ingress queue of Switch", "\""+str(self.id)+"\"")
+
+            # add queue enter timestamp
+            packet.set_queue_enter(g_timestamp)
+
+            # ST
+            if packet.__class__.__name__ == "ST":
+                # TODO : figure out how ingress selects which queue (if > 1) to put traffic in
+                self.ST_queue[0].append(packet)
+                final_ingress.remove(packet)
+
+            # SH
+            if packet.__class__.__name__ == "Sporadic_Hard":
+                # TODO : figure out how ingress selects which queue (if > 1) to put traffic in
+                self.SH_queue[0].append(packet)
+                final_ingress.remove(packet)
+
+            # SS
+            if packet.__class__.__name__ == "Sporadic_Soft":
+                # TODO : figure out how ingress selects which queue (if > 1) to put traffic in
+                self.SS_queue[0].append(packet)
+                final_ingress.remove(packet)
+
+            # BE
+            if packet.__class__.__name__ == "BE":
+                # TODO : figure out how ingress selects which queue (if > 1) to put traffic in
+                self.BE_queue[0].append(packet)
+                final_ingress.remove(packet)
+
+
+        self.ingress_traffic = final_ingress
+        return 1
+
+
+    # applies scheduling to the 8 queues to get packets in the egress section
+    def cycle_queues(self):
+        # TODO : implement other traffic types and other schedules go in here
+        gcl_pos = 0
+        self.available_packets = []
+
+        # ST queues
+        for i in range(len(self.ST_queue)):
+            # first check the GCL to see if the queue is open
+            gcl_pos += 1  # for next iteration
+            if g_current_GCL_state[gcl_pos-1] == str(0):  # if gate is shut
+                continue  # skip this iteration
+
+            # if open, copy packet to temp queue depending on its schedule to show it is available to be sent
+            if self.queue_definition.ST_schedule == e_queue_schedules[0]:  # FIFO
+                if len(self.ST_queue[i]) != 0:  # if queue isnt empty
+                    if SIM_DEBUG:  # for debug
+                        print("[T", str(g_timestamp).zfill(3)+"]", "[FIFO] Adding ST packet", "\""+str(self.ST_queue[i][0].name)+"\"", \
+                              "from ES", "\""+str(self.ST_queue[i][0].source)+"\"", "to \"available_packets\" queue of Switch", \
+                              "\""+str(self.id)+"\"")
+
+                    # add queue number, and packet to available packet
+                    self.available_packets.append((i, self.ST_queue[i][0]))  # FIFO part here.
+
+            # TODO : EDF would loop entire queue to find shortest deadline and then add etc e.g:
+            # if self.queue_definition.ST_schedule == e_queue_schedules[1]:  # EDF
+            # for packet in queue:
+            #   find earliest deadline, add to available packets
+
+        return 1
+
+
+    # function to check available packets list, apply strict priority ordering, and send 1 packet
+    def egress_packets(self):
+        # now we send highest priority packet from the list of available packets
+        if len(self.available_packets) == 0:  # if available packets queue empty, do nothing
+            return 0
+
+        # find highest priority packet out of all packets available to be sent
+        packet_to_send = self.available_packets[0]
+        for packet in self.available_packets:
+            if packet[1].priority < packet_to_send[1].priority:
+                packet_to_send = packet
+
+        # send it
+        self.forward(packet_to_send[1])
+
+        # remove it from its original queue
+        queue_type = packet_to_send[1].__class__.__name__
+        queue_number = packet_to_send[0]
+        if queue_type == "ST":
+            self.ST_queue[queue_number].remove(packet_to_send[1])
+        elif queue_type == "Sporadic_Hard":
+            self.SH_queue[queue_number].remove(packet_to_send[1])
+        elif queue_type == "Sporadic_Soft":
+            self.SS_queue[queue_number].remove(packet_to_send[1])
+        elif queue_type == "Best_Effort":
+            self.BE_queue[queue_number].remove(packet_to_send[1])
+
+        return 1
 
 
     # sends the traffic to destination from route in routing table
-    def forward(self, destination):
+    # TODO : This may need to be translated into sending multiple frames looped so it can be preempted
+    def forward(self, packet):
         self.packets_transmitted += 1
-        # TODO : implement destination lookup in local routing table and add to egress queue
+        self.recalculate_packet_delay(packet)
+
+        # get hop from routing table
+        hop = -1
+        for route in self.local_routing_table:
+            if int(route[0]) == int(packet.destination):
+                hop = route[1]
+                break  # found
+
+        if SIM_DEBUG:  # debug
+            print("[T", str(g_timestamp).zfill(3)+"]", "Sending", str(packet.__class__.__name__), \
+                  "packet", "\""+str(packet.name)+"\"", "from ES", "\""+str(packet.source)+"\"", \
+                  "in egress queue of Switch", "\""+str(self.id)+"\"", \
+                  "to node ID", "\""+str(packet.destination)+"\"" if int(hop) == int(self.id) else "\""+str(hop)+"\"")
+
+        # if hop is this switch we can send packet directly to the ES else we send to next switch
+        g_node_id_dict[int(packet.destination) if int(hop) == int(self.id) else int(hop)].RX_packet(packet)
+
+        return 1
 
 
-    # call this a lot
-    def recalculate_delay(self):
-        # recalculate the delay based on current packet in and out time
-        pass
+    # function that recalculates queueing delay for this switch
+    def recalculate_packet_delay(self, packet):
+        packet.set_queue_leave(g_timestamp)  # set the queue_leave time for this packet
+        queue_delay = int(int(packet.queue_leave)-int(packet.queue_enter))  # get the time it has been in the queue
+        g_queueing_delays.append(queue_delay)  # add to global array
+
+        # change local variables
+        self.total_queue_delay += queue_delay  # cumulative
+        self.average_queue_delay = int(self.total_queue_delay) / int(self.packets_transmitted)
+
+        return 1
 
 
-    # setters
+    ## Setters
     def set_queue_def(self, queue_def):
         self.queue_definition = queue_def
+
+        # put empty lists in each queue type to signify how many queues each queue type has
+        [self.ST_queue.append([]) for i in range(self.queue_definition.ST_count)]
+        [self.EM_queue.append([]) for i in range(self.queue_definition.emergency_count)]
+        [self.SH_queue.append([]) for i in range(self.queue_definition.sporadic_hard_count)]
+        [self.SS_queue.append([]) for i in range(self.queue_definition.sporadic_soft_count)]
+        [self.BE_queue.append([]) for i in range(self.queue_definition.BE_count)]
+
+        return 1
 
 
     def set_local_routing_table(self, routing_table_def):
         self.local_routing_table = routing_table_def
+        return 1
 
 
 
@@ -218,8 +437,10 @@ class Controller(Switch):
         pass
 
 
+    ## Setters
     def set_routing_table(self, main_routing_table):
         self.routing_table = main_routing_table  # the entire routing table is stored in this object
+        return 1
 
 
 
@@ -243,18 +464,35 @@ class Traffic():
 
 
 
-
 # define packets that belong to the traffic class (frame -> packet -> traffic)
 # TODO : may need to have data in here somehow, or in frames
 class Packet(Traffic):
 
     def __init__(self, source, destination, priority, name="unnamed", offset="0"):
         super().__init__(source, destination)
-        self.arrival_time = -1  # this is changed upon successful transmission from the node when it leaves the queue
+        self.arrival_time = -1
         self.transmission_time = g_timestamp
+        self.queue_enter = -1
+        self.queue_leave = -1
         self.priority = priority
+        self.name = name
         self.offset = offset
 
+
+    ## Setters
+    def set_arrival_time(self, timestamp):
+        self.arrival_time = timestamp
+        return 1
+
+
+    def set_queue_enter(self, timestamp):
+        self.queue_enter = timestamp
+        return 1
+
+
+    def set_queue_leave(self, timestamp):
+        self.queue_leave = timestamp
+        return 1
 
 
 
@@ -331,6 +569,7 @@ class Best_Effort(NonST):
 
 # queue class (should be present in each switch)
 class Queue():
+
     def __init__(self, ST_count, emergency_count, sporadic_hard_count, sporadic_soft_count, BE_count, \
                  ST_schedule=e_queue_schedules[0], emergency_schedule=e_queue_schedules[0], \
                  sporadic_hard_schedule=e_queue_schedules[0], sporadic_soft_schedule=e_queue_schedules[0], \
@@ -500,8 +739,8 @@ def error_check_switch(switch):
                 print("ERROR: Duplicate ID found (ID:", switch.get("unique_id")+")")
                 return 0
             end_station_count += 1  # no errors, add to count
-            end_station_node = End_Station(int(node.get("unique_id")), node.get("name"))  # create node
-            g_node_id_dict[int(node.get("unique_id"))] = end_station_node  # switch and its children are error free, add its ID to list
+            end_station_node = End_Station(int(node.get("unique_id")), switch.get("unique_id"), node.get("name"))  # create node
+            g_node_id_dict[int(node.get("unique_id"))] = end_station_node  # add this erorr free end station to node list
         if end_station_count < 1:  # must be at least 1 end station
             print("ERROR: There must be at least 1 end station connected to switch (ID:", switch.get("unique_id")+")")
             return 0
@@ -1305,7 +1544,8 @@ switch_ids = []
 for node_id in g_node_id_dict:
     if g_node_id_dict[node_id].node_type == "End_Station":  # get end station from global id list
         t_id = gen_utils.get_restricted_descision("What generic Traffic ID should End_Station (ID: "+str(node_id)+")"+" get?", traffic_ids)
-        g_node_id_dict[node_id].set_traffic_rules(g_generic_traffics_dict[t_id])
+        if g_node_id_dict[node_id].set_traffic_rules(g_generic_traffics_dict[t_id])  == 0:
+            exit()  # if failure
         es_ids.append(node_id)
     else:
         switch_ids.append(node_id)  # if not ES then node is Switch
@@ -1313,19 +1553,55 @@ for node_id in g_node_id_dict:
 
 ## Begin Simulator
 # timestamp initialised at 0 at top of file
-max_timestamp = 20  # TODO : ask the user here when finished debugging gen_utils.getInt...
-for i in range(1, max_timestamp):
+max_timestamp = 28  # TODO : ask the user here when finished debugging using gen_utils.getInt...
+for tick in range(1, max_timestamp):
+    #print("Tick", tick)
+
+    # first set GCL to timestamp
+    if g_timestamp in g_offline_GCL:  # if time is present, update state, else we are in a range so leave it
+        # TODO : somehow incorperate active GCL into this unless that is just for emergency queue
+        g_current_GCL_state = g_offline_GCL[g_timestamp]
+
 
     # check each ES for traffic to send based on its traffic sending rules
     for es in es_ids:
-        g_node_id_dict[es].check_to_send()
-    #g_node_id_dict[1].advance()
+        g_node_id_dict[es].check_to_generate()
+
+    # ingress packets from every queue
+    for switch in switch_ids:
+        g_node_id_dict[switch].ingress_packets()
+
+    # cycle the inner queues of every switch
+    for switch in switch_ids:
+        g_node_id_dict[switch].cycle_queues()
+
+    # send packets from egress section of every queue
+    for switch in switch_ids:
+        g_node_id_dict[switch].egress_packets()
+
+    # send packets in end station egress queues and digest any packets that are in the ingress queue
+    for es in es_ids:
+        g_node_id_dict[es].flush_egress()
+        g_node_id_dict[es].digest_packets()
+
 
     g_timestamp += 1
+    #print()
 
-epochs = 10000
-
-
+print()
+print("Packets transmitted per Switch:")
+for sw in switch_ids:
+    print("SW ID:", sw, "packets transmitted:", g_node_id_dict[sw].packets_transmitted)
+print()
+print("Packet Latencies:\n ", g_packet_latencies)
+print("Average="+str(sum(g_packet_latencies)/len(g_packet_latencies)))
+print()
+print("Average Queue Delays per Switch:")
+for sw in switch_ids:
+    print("SW ID:", sw, "average packet queueing delay:", g_node_id_dict[sw].average_queue_delay)
+print()
+print("Global packet delays:")
+print(g_queueing_delays)
 
 
 

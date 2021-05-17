@@ -3,7 +3,7 @@ string
 
 # for simulator
 pathlib
-
+random
 
 # shared
 lxml
