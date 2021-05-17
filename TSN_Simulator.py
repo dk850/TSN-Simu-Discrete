@@ -110,8 +110,9 @@ class End_Station(Node):
 
 
     # check if it is packet generation time and if so put new packet in egress
+    # TODO : Add checks for other types of traffic (SH, SS, BE)
+    # TODO : Add appropriate random generator functions for min_release of nonst traffic types as they can come at any time (not period like ST)
     def check_to_generate(self):
-        # TODO : Add checks for other types of traffic (SH, SS, BE) and appropriate random generator functions
 
         # determine type as ST generates differently
         if self.t_type == "ST":
@@ -142,6 +143,7 @@ class End_Station(Node):
                       "\""+str(packet.name)+"\"", "from source ES", "\""+str(packet.source)+"\"", \
                       "at final destination ES", "\""+str(self.id)+"\"", "with latency", \
                       "\""+str(int(packet.arrival_time)-int(packet.transmission_time))+"\"")
+
             g_packet_latencies.append(int(packet.arrival_time)-int(packet.transmission_time))  # add latency to list
         self.ingress_traffic = []  # clear queue as we have ingested everything
 
@@ -179,7 +181,6 @@ class End_Station(Node):
 
     ## Setters
     def set_traffic_rules(self, rules):
-        # TODO : add other traffic types
 
         if 0:  # for debugging
             print("Rule properties:")
@@ -188,7 +189,7 @@ class End_Station(Node):
                 print(entry+":", rules[entry])
             print()
 
-        # erorr check destination
+        # erorr check destination ID is not current ID
         if str(rules["destination_id"]) == str(self.id):  # error check cant have destination be itself
             print("CRITICAL ERROR: Cannot have Traffic rule destination_id be the same ID as the source in ES", \
                   "\""+str(self.id)+"\"")
@@ -211,12 +212,24 @@ class End_Station(Node):
             self.t_dest = str(random.choice(es_list))  # pick a random node from the list
 
 
-        # extract ST attributes
+        ## Extract per-type attributes
         if self.t_type == "ST":
             self.t_period = rules["period"]
             self.t_deadline = rules["hard_deadline"]
             self.t_delay_jitter = rules["max_release_jitter"]
-
+        elif self.t_type == "Sporadic_Hard":
+            self.t_deadline = rules["hard_deadline"]
+            self.t_delay_jitter = rules["max_release_jitter"]
+            self.t_min_release = rules["min_inter_release"]
+        elif self.t_type == "Sporadic_Soft":
+            self.t_deadline = rules["soft_deadline"]
+            self.t_delay_jitter = rules["max_release_jitter"]
+            self.t_min_release = rules["min_inter_release"]
+        elif self.t_type == "BE":
+            pass  # no timing constraints
+        else:
+            print("CRITICAL ERROR: Incorrect traffic type assigned to ES ID", "\""+str(self.id)+"\"")
+            return 0
         return 1
 
 
@@ -231,11 +244,13 @@ class Switch(Node):
 
     def __init__(self, id, name="unnamed"):
         super().__init__(id, name)
-        self.available_packets = []
+        self.local_routing_table = -1  # to be set
+        self.available_packets = []  # dynamic
+
+        # instance variables used for output statistics
         self.packets_transmitted = 0
         self.total_queue_delay = 0
         self.average_queue_delay = 0.0
-        self.local_routing_table = -1  # to be set
 
         # queues
         self.queue_definition = -1  # to be set
@@ -247,9 +262,9 @@ class Switch(Node):
 
 
     # filters packets in the ingress queue into the relevant Traffic queue within the switch according to the queue_def
+    # TODO : acceptance function in this part somehow
+    # TODO : work out how to put traffics in different queues of same type
     def ingress_packets(self):
-        # TODO : acceptance function somehow
-        # TODO : work out how to put traffics in different queues of same type
 
         # if ingress queue is empty do nothing
         if len(self.ingress_traffic) == 0:
@@ -299,8 +314,9 @@ class Switch(Node):
 
 
     # applies scheduling to the 8 queues to get packets in the egress section
+    # NOTE : other schedule types need to be coded in here from e_queue_schedules
+    # TODO : implement other traffic types
     def cycle_queues(self):
-        # TODO : implement other traffic types and other schedules go in here
         gcl_pos = 0
         self.available_packets = []
 
@@ -453,14 +469,14 @@ class Controller(Switch):
 class Traffic():
 
     def __init__(self, source, destination):
-        # get IDs
         self.source = source
-        self.destination = destination  # list. May not need to be initialised
+        self.destination = destination
 
 
-    # setters
+    ## Setters
     def set_dest(self, dest):
         self.destination = dest
+        return 1
 
 
 
@@ -470,13 +486,15 @@ class Packet(Traffic):
 
     def __init__(self, source, destination, priority, name="unnamed", offset="0"):
         super().__init__(source, destination)
-        self.arrival_time = -1
-        self.transmission_time = g_timestamp
-        self.queue_enter = -1
-        self.queue_leave = -1
         self.priority = priority
         self.name = name
         self.offset = offset
+
+        # instance variables
+        self.transmission_time = g_timestamp  # set to now as soon as object is initialised it is transmitted
+        self.arrival_time = -1
+        self.queue_enter = -1
+        self.queue_leave = -1
 
 
     ## Setters
@@ -498,7 +516,6 @@ class Packet(Traffic):
 
 # ST traffic type
 class ST(Packet):
-    # for this type of traffic we use the GCL so need to show this somehow
 
     def __init__(self, source, destination, delay_jitter_constraints, period, deadline, \
                  name="unnamed", offset="0"):
@@ -568,6 +585,7 @@ class Best_Effort(NonST):
 ##################################################
 
 # queue class (should be present in each switch)
+# TODO : GCL in here is useless I think - best being global
 class Queue():
 
     def __init__(self, ST_count, emergency_count, sporadic_hard_count, sporadic_soft_count, BE_count, \
@@ -602,14 +620,6 @@ class Queue():
     def acceptance_test(self, frame):
         # dummy function
         return True
-
-
-    def packet_ingress(self, packet):
-        pass
-
-
-    def packet_egress(self, packet):
-        pass
 
 
     def to_string(self):
