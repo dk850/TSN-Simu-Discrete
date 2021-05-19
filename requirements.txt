@@ -4,6 +4,7 @@ string
 # for simulator
 pathlib
 random
+math
 
 # shared
 lxml

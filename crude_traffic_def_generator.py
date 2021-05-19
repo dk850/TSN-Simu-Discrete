@@ -8,6 +8,7 @@ No visualisation
 ##################################################
 
 from lxml import etree
+import random
 import generator_utilities as gen_utils
 
 
@@ -18,7 +19,7 @@ import generator_utilities as gen_utils
 ##################################################
 
 # wrapper to call generator class for use outside of this script
-def generate(filename, allow_naming=True, allow_offset=True, allow_dest=True):
+def generate(filename, allow_naming=True, allow_offset=True, allow_dest=True, allow_size=True):
 
     # if allow_naming allowed (Default), ask the user if they want to name their nodes
     if allow_naming:
@@ -40,8 +41,15 @@ def generate(filename, allow_naming=True, allow_offset=True, allow_dest=True):
     else:
         dest_set_mode = False
 
+    # if allow_size allowed (Default), ask the user if they want to be able to individually set packet size
+    if allow_size:
+        size_set_mode = gen_utils.get_YesNo_descision("Do you wish to be able to set the packet size of any Traffics about to be defined?"\
+                                                      + " (Else it will default to 16 Bytes and able to be sent in 1 tick)")
+    else:
+        size_set_mode = False
+
     # begin generation
-    Generator(filename, node_name_mode, offset_set_mode, dest_set_mode)
+    Generator(filename, node_name_mode, offset_set_mode, dest_set_mode, size_set_mode)
 
 
 
@@ -52,7 +60,7 @@ def generate(filename, allow_naming=True, allow_offset=True, allow_dest=True):
 
 class Generator():
 
-    def __init__(self, filename, node_name_mode, offset_set_mode, dest_set_mode):
+    def __init__(self, filename, node_name_mode, offset_set_mode, dest_set_mode, size_set_mode):
 
         queue_types = ["ST", "Sporadic_Hard", "Sporadic_Soft", "BE"]  # possible queue types for later
 
@@ -104,12 +112,23 @@ class Generator():
                 # 0 can never be an end station as it is always the controller so this signifies random
                 dest = "0"  # default to 0
 
+            # if we are allowed to set a size for the packets set that here too
+            if size_set_mode:
+                size = str(gen_utils.get_int_descision("Input packet size for Traffic " + \
+                                                       str(traffic_id)+" (0 for random between 1 and 64)", 0))
+                if size == 0:
+                    size = random.randInt(1, 64)
+                    print("Traffic", str(traffic_id), "packet size randomly set to", str(size))
+            else:
+                size = "16"  # default to 16 bytes
+
 
             # set this Traffic Definition base attributes
             t_ele.set("unique_id", str(traffic_id))
             t_ele.set("name", str(traffic_name))
             t_ele.set("offset", str(traffic_offset))
             t_ele.set("destination_id", str(dest))
+            t_ele.set("size", str(size))
 
 
             ## determine what type of traffic this queue is for

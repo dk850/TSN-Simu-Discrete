@@ -10,6 +10,7 @@ Specify file locations for neccesay files (Network Topo, Traffic Definition, GCL
 
 # libraries
 import random
+import math
 from pathlib import Path
 from lxml import etree
 
@@ -38,6 +39,7 @@ g_queueing_delays = []
 ##################################################
 
 # global variables to set
+SENDING_SIZE_CAPCITY = 16  # size (in bytes) of frames able to be sent in 1 tick
 MAX_NODE_COUNT = 100
 MAX_TRAFFIC_COUNT = 1000
 SIM_DEBUG = 1  # debug for simulator to see timestamps
@@ -73,6 +75,7 @@ class Node():
         self.name = name
         self.ingress_traffic = []
         self.egress_traffic = []
+        self.busy = 0  # attribute used to see how busy the node is (how many ticks it has left to complete)
 
 
     def RX_packet(self, packet):
@@ -117,27 +120,27 @@ class End_Station(Node):
         if self.t_type == "ST":
             if self.generate():  # returns true when its time to generate a packet
                 packet = ST(self.id, self.t_dest, self.t_delay_jitter, self.t_period, self.t_deadline,
-                            self.t_name, self.t_offset)
+                            self.t_size, self.t_name, self.t_offset)
                 self.egress(packet)  # generate new packet and egress it
 
         # SH
         elif self.t_type == "Sporadic_Hard":
             if self.generate():  # returns true when its time to generate a packet
                 packet = Sporadic_Hard(self.id, self.t_dest, self.t_min_release, self.t_delay_jitter, \
-                                       self.t_deadline, self.t_name, self.t_offset)
+                                       self.t_deadline, self.t_size, self.t_name, self.t_offset)
                 self.egress(packet)
 
         # SS
         elif self.t_type == "Sporadic_Soft":
             if self.generate():  # returns true when its time to generate a packet
                 packet = Sporadic_Soft(self.id, self.t_dest, self.t_min_release, self.t_delay_jitter, \
-                                       self.t_deadline, self.t_name, self.t_offset)
+                                       self.t_deadline, self.t_size, self.t_name, self.t_offset)
                 self.egress(packet)
 
         # BE
         elif self.t_type == "BE":
             if self.generate():  # returns true when its time to generate a packet
-                packet = Best_Effort(self.id, self.t_dest, self.t_name, self.t_offset)
+                packet = Best_Effort(self.id, self.t_dest, self.t_size, self.t_name, self.t_offset)
                 self.egress(packet)
 
         # else unrecognised packet
@@ -183,16 +186,20 @@ class End_Station(Node):
                   "Burst sending all packets to parent Switch:", str(self.parent_id))
 
 
-        # loop over all packets in egress queue
-        for packet in self.egress_traffic:
-            g_node_id_dict[self.parent_id].RX_packet(packet)  # send the packet to the parent switches ingress queue
+        # if not busy
+        if self.busy == 0:
 
-            if SIM_DEBUG:  # for debug
-                print("[T", str(g_timestamp).zfill(3)+"]", "Sending", str(packet.__class__.__name__), "Traffic", \
-                      "\""+str(packet.name)+"\"", "to parent Switch", "\""+str(self.parent_id)+"\"", \
-                      "from egress queue of ES", "\""+str(self.id)+"\"")
+            # loop over all packets in egress queue
+            for packet in self.egress_traffic:
+                g_node_id_dict[self.parent_id].RX_packet(packet)  # send the packet to the parent switches ingress queue
+                #self.busy = math.ceil(packet_size / SENDING_SIZE_CAPCITY)  # how many ticks the node will be busy for
 
-        self.egress_traffic = []  # empty queue as we have sent all packets
+                if SIM_DEBUG:  # for debug
+                    print("[T", str(g_timestamp).zfill(3)+"]", "Sending", str(packet.__class__.__name__), "Traffic", \
+                          "\""+str(packet.name)+"\"", "to parent Switch", "\""+str(self.parent_id)+"\"", \
+                          "from egress queue of ES", "\""+str(self.id)+"\"")
+
+            self.egress_traffic = []  # empty queue as we have sent all packets
 
         return 1
 
@@ -202,7 +209,8 @@ class End_Station(Node):
 
         if SIM_DEBUG:  # for debug
             print("[T", str(g_timestamp).zfill(3)+"]", "Adding newly generated", str(self.t_type), "packet", \
-                  "\""+str(packet.name)+"\"", "to egress queue of ES", "\""+str(self.id)+"\"")
+                  "\""+str(packet.name)+"\"", "of size", "\""+str(self.t_size)+"\"", "to egress queue of ES", \
+                  "\""+str(self.id)+"\"")
 
         # make sure packet matches a type defined at the start of the program
         if packet.__class__.__name__ in e_queue_type_names:
@@ -280,6 +288,7 @@ class End_Station(Node):
         self.t_offset = rules["offset"]
         self.t_type = rules["type"]
         self.t_dest = rules["destination_id"]
+        self.t_size = rules["size"]
 
         # if destination_id is 0, we need to change it to a random ES ID
         if int(self.t_dest) == 0:
@@ -720,11 +729,12 @@ class Traffic():
 # TODO : may need to have data in here somehow, or in frames
 class Packet(Traffic):
 
-    def __init__(self, source, destination, priority, name="unnamed", offset="0"):
+    def __init__(self, source, destination, priority, size, name="unnamed", offset="0"):
         super().__init__(source, destination)
         self.priority = priority
         self.name = name
         self.offset = offset
+        self.packet_size = size
 
         # instance variables
         self.transmission_time = g_timestamp  # set to now as soon as object is initialised it is transmitted
@@ -753,9 +763,9 @@ class Packet(Traffic):
 # ST traffic type
 class ST(Packet):
 
-    def __init__(self, source, destination, delay_jitter_constraints, period, deadline, \
+    def __init__(self, source, destination, delay_jitter_constraints, period, deadline, size, \
                  name="unnamed", offset="0"):
-        super().__init__(source, destination, 1, name, offset)  # priority 1
+        super().__init__(source, destination, 1, size, name, offset)  # priority 1
         self.delay_jitter_constraints = int(delay_jitter_constraints)
         self.period = int(period)
         self.hard_deadline = int(deadline)
@@ -779,8 +789,8 @@ class ST(Packet):
 class NonST(Packet):
 
     def __init__(self, source, destination, priority, minimal_inter_release_time, delay_jitter_constraints, \
-                 name="unnamed", offset="0"):
-        super().__init__(source, destination, priority, name, offset)
+                 size, name="unnamed", offset="0"):
+        super().__init__(source, destination, priority, size, name, offset)
         self.minimal_inter_release_time = minimal_inter_release_time
         self.delay_jitter_constraints = delay_jitter_constraints
 
@@ -790,8 +800,8 @@ class NonST(Packet):
 class Sporadic_Hard(NonST):
 
     def __init__(self, source, destination, minimal_inter_release_time, delay_jitter_constraints, \
-                 deadline, name="unnamed", offset="0"):
-        super().__init__(source, destination, 2, minimal_inter_release_time, delay_jitter_constraints, name, offset)  # priority 2
+                 deadline, size, name="unnamed", offset="0"):
+        super().__init__(source, destination, 2, minimal_inter_release_time, delay_jitter_constraints, size, name, offset)  # priority 2
         self.hard_deadline = deadline
 
 
@@ -800,8 +810,8 @@ class Sporadic_Hard(NonST):
 class Sporadic_Soft(NonST):
 
     def __init__(self, source, destination, minimal_inter_release_time, delay_jitter_constraints, \
-                 deadline, name="unnamed", offset="0"):
-        super().__init__(source, destination, 3, minimal_inter_release_time, delay_jitter_constraints, name, offset)  # priority 3
+                 deadline, size, name="unnamed", offset="0"):
+        super().__init__(source, destination, 3, minimal_inter_release_time, delay_jitter_constraints, size, name, offset)  # priority 3
         self.soft_deadline = deadline
 
 
@@ -809,8 +819,8 @@ class Sporadic_Soft(NonST):
 # best effort type of nonST traffic
 class Best_Effort(NonST):
 
-    def __init__(self, source, destination, name="unnamed", offset="0"):
-        super().__init__(source, destination, 4, 0, 0, name, offset)  # priority 4, no timing constraints
+    def __init__(self, source, destination, size, name="unnamed", offset="0"):
+        super().__init__(source, destination, 4, 0, 0, size, name, offset)  # priority 4, no timing constraints
 
 
 
@@ -1428,7 +1438,11 @@ def parse_traffic_definition(f_traffic_def, debug=0):
                 print("ERROR: Traffic (ID:", child.get("unique_id")+")", "has destination_id: \"" + \
                       str(child.get("destination_id"))+"\"", "which does not match an End Station")
                 return 0
-        if len(child.keys()) != 4:  # traffic should only have 4 attributes. "unique_id", "name" "offset" and "destination_id"
+        if "size" not in child.keys():  # check for a size attribute
+            if debug:
+                print("Child ID:", child.get("unique_id"), "has no \"size\" attribute. Defaulting to \"16\"")
+            child.set("size", "16")
+        if len(child.keys()) != 5:  # traffic should only have 5 attributes. "unique_id", "name" "offset" "destination_id" and "size"
             print("ERROR: Traffic (ID:", child.get("unique_id")+")", "has incorrect amount of attributes (should be 4)")
             return 0
         if len(child) != 1:  # traffic should only have 1 child, the type of traffic it is
@@ -1440,6 +1454,7 @@ def parse_traffic_definition(f_traffic_def, debug=0):
         traffic_type["offset"] = int(child.get("offset"))
         traffic_type["name"] = str(child.get("name"))
         traffic_type["destination_id"] = str(child.get("destination_id"))
+        traffic_type["size"] = str(child.get("size"))
 
         # deal with specific traffic types and prepare objects for the child
         if child[0].tag == traffic_types[0]:  # ST Traffic
