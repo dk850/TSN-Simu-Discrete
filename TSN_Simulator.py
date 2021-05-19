@@ -39,7 +39,6 @@ g_queueing_delays = []
 ##################################################
 
 # global variables to set
-SENDING_SIZE_CAPCITY = 16  # size (in bytes) of frames able to be sent in 1 tick
 MAX_NODE_COUNT = 100
 MAX_TRAFFIC_COUNT = 1000
 SIM_DEBUG = 1  # debug for simulator to see timestamps
@@ -57,7 +56,13 @@ files_directory       = "simulator_files\\"
 network_topo_file       = files_directory+using+"_network_topology.xml"
 queue_definition_file   = files_directory+using+"_queue_definition.xml"
 GCL_file                = files_directory+using+"_gcl.txt"
-traffic_definition_file = files_directory+using+"_traffic_definition.xml"
+traffic_definition_file = files_directory+using+"_trafffic_definition.xml"
+
+# generator parameters
+SENDING_SIZE_CAPCITY = 16  # size (in bytes) of frames able to be sent in 1 tick
+BE_FIRE_CHANCE = 0.01  # 1% chance to fire best effort queue
+SPORADIC_FIRE_CHANCE = 0.1  # 10% chance to fire both sporadic queues when possible
+EMERGENCY_QUEUE_CHANCE = 0.05  # 5% chance an ST packet will go into the emergency queue
 
 
 
@@ -152,6 +157,7 @@ class End_Station(Node):
 
     # function to recieve packets in ingress queue
     def digest_packets(self):
+        failed = False
 
         if len(self.ingress_traffic) == 0:  # do nothing if queue empty
             return 0
@@ -164,9 +170,9 @@ class End_Station(Node):
             if packet.arrival_time == -1:  # if it is the packets first tick in the ingress queue of the ES
                 if SIM_DEBUG:  # debug
                     print("[T", str(g_timestamp).zfill(3)+"]", "Found", \
-                          "start of "+str(packet.__class__.__name__)+" packet \""+str(packet.name)+"\" size \""+str(packet.size)+"\"" \
+                          "start of "+str(packet.type)+" packet \""+str(packet.name)+"\" size \""+str(packet.size)+"\"" \
                           if math.ceil(int(packet.size) / SENDING_SIZE_CAPCITY) > 1 else \
-                          str(packet.__class__.__name__)+" packet \""+str(packet.name)+"\"" \
+                          str(packet.type)+" packet \""+str(packet.name)+"\"" \
                           , "from ES", "\""+str(packet.source)+"\"", "in destination ingress queue of ES", "\""+str(self.id)+"\"")
 
                 packet.set_arrival_time(g_timestamp)  # add queue enter timestamp
@@ -176,20 +182,50 @@ class End_Station(Node):
                 continue  # if it hasnt fully arrived we cant digest it. Try again next tick, move on to other packets
             # else properly ingest the packet into the correct inner queue
 
+
             # add latency to global list including time ES was busy receiving packet. i.e. latency is start of send until complete receive
             g_packet_latencies.append(int(packet.arrival_time)-int(packet.transmission_time) + \
                                       int(math.ceil(int(packet.size) / SENDING_SIZE_CAPCITY)) )
             final_ingress.remove(packet)  # remove from copy of list so we dont alter the for loop
 
+
+            # to check the latency of the packet hasn't extended past its deadline we need to check the types
+            if packet.type == "ST":
+                if g_packet_latencies[-1] > packet.hard_deadline:
+                    print("CRITICAL ERROR:", str(packet.type), "packet", "\""+str(packet.name)+"\"", "from ES", "\""+str(packet.source)+"\"", \
+                          "reached destination ES", "\""+str(self.id)+"\"", "AFTER its deadline")
+                    failed = True
+            elif packet.type == "Sporadic_Hard":
+                if g_packet_latencies[-1] > packet.hard_deadline:
+                    print("CRITICAL ERROR:", str(packet.type), "packet", "\""+str(packet.name)+"\"", "from ES", "\""+str(packet.source)+"\"", \
+                          "reached destination ES", "\""+str(self.id)+"\"", "AFTER its deadline")
+                    failed = True
+            elif packet.type == "Sporadic_Soft":
+                if g_packet_latencies[-1] > packet.soft_deadline:
+                    print("ERROR:", str(packet.type), "packet", "\""+str(packet.name)+"\"", "from ES", "\""+str(packet.source)+"\"", \
+                          "reached destination ES", "\""+str(self.id)+"\"", "AFTER its deadline")
+                    failed = True
+            elif packet.type == "BE":  # no timing constraints
+                pass
+            else:
+                print("ERROR: Unrecognised packet type", "\""+str(packet.type)+"\"", "has reached ES", \
+                      "\""+str(self.id)+"\"", "ingress queue")
+                failed = True
+
+
             if SIM_DEBUG:  # for debug
-                print("[T", str(g_timestamp).zfill(3)+"]", "Digested", str(packet.__class__.__name__), "packet", \
+                print("[T", str(g_timestamp).zfill(3)+"]", "Digested", str(packet.type), "packet", \
                       "\""+str(packet.name)+"\"", "from source ES", "\""+str(packet.source)+"\"", \
                       "at final destination ES", "\""+str(self.id)+"\"", "with latency", \
                       "\""+str(int(packet.arrival_time)-int(packet.transmission_time))+"\"")
 
         self.ingress_traffic = final_ingress  # update queue with packets removed. Real world would act on packet here - maybe send something back
 
-        return 1
+
+        if failed:
+            return 0
+        else:
+            return 1
 
 
     # function to add a packet to the egress queue with error checking
@@ -200,7 +236,7 @@ class End_Station(Node):
                   "\""+str(packet.name)+"\"", "to egress queue of ES", "\""+str(self.id)+"\"")
 
         # make sure packet matches a type defined at the start of the program
-        if packet.__class__.__name__ in e_queue_type_names:
+        if packet.type in e_queue_type_names:
             self.egress_traffic.append(packet)
             return 1
 
@@ -227,7 +263,7 @@ class End_Station(Node):
                 self.egress_traffic.remove(packet)  # remove this packet from queue as it is being sent
 
                 if SIM_DEBUG:  # for debug
-                    print("[T", str(g_timestamp).zfill(3)+"]", "Sending", str(packet.__class__.__name__), "packet", \
+                    print("[T", str(g_timestamp).zfill(3)+"]", "Sending", str(packet.type), "packet", \
                           "\""+str(packet.name)+"\"", "of size", "\""+str(self.t_size)+"\"", "to parent Switch", \
                           "\""+str(self.parent_id)+"\"", "from egress queue of ES", "\""+str(self.id)+"\"")
 
@@ -238,15 +274,20 @@ class End_Station(Node):
     # function to be used within the packet generator that chooses when to generate a packet depending on type (simulate sporadicness)
     def generate(self):
 
+        # if there is an offset, dont do anything for first N ticks
+        if self.t_offset != 0:
+            if g_timestamp < self.t_offset:
+                return False
+
         # BE queue has no timing constraints. Give it a percentage chance to fire
         if self.t_type == "BE":
-            if random.random() < 0.01:  # 1% chance to fire every tick (period ~ 100 ticks)
+            if random.random() < BE_FIRE_CHANCE:  # 1% chance to fire every tick (period ~ 100 ticks)
                 return True
             else:
                 return False
 
         elif self.t_type == "ST":  # ST queue is based off its period and nothing else
-            if g_timestamp % self.t_period == 0:  # if we are at a multiple of its period
+            if (g_timestamp-self.t_offset) % self.t_period == 0:  # if we are at a multiple of its period (including offset)
                 return True
             else:
                 return False
@@ -255,7 +296,7 @@ class End_Station(Node):
         # NOTE : I have commented out the t_delay_jitter parts as im not sure how this variable is used
         #          if it means the packet has to be sent within X ticks of being able to then this can be uncommented
         if self.t_previous_fire == 0:  # if first fire ignore initial min release
-            if random.random() < 0.1:  # the packet has a 10% chance to fire (average takes ~10 ticks)
+            if random.random() < SPORADIC_FIRE_CHANCE:  # the packet has a % chance to fire
                 self.t_previous_fire = g_timestamp
                 return True
             else:
@@ -270,7 +311,7 @@ class End_Station(Node):
             #     self.t_previous_fire = g_timestamp
             #     return True
             # else:  # re-indent below
-            if random.random() < 0.1:  # the packet has a 10% chance to fire (average takes ~10 ticks)
+            if random.random() < SPORADIC_FIRE_CHANCE:  # the packet has a % chance to fire
                 self.t_previous_fire = g_timestamp
                 return True
             else:
@@ -401,7 +442,7 @@ class Switch(Node):
             if packet.__class__.__name__ == "ST":
 
                 # simulate a small chance the ST packet will go into the emergency queue to pretend it is late
-                if random.random() < 0.05:  # 5% chance
+                if random.random() < EMERGENCY_QUEUE_CHANCE:  # % chance
                     if self.queue_definition.acceptance_test(packet):  # if acceptance test True
                         self.q_load_balance(self.EM_queue, packet)  # add to Emergency queue
                         if SIM_DEBUG:  # debug
@@ -768,6 +809,7 @@ class Packet(Traffic):
         self.name = name
         self.offset = offset
         self.size = size
+        self.type = self.__class__.__name__
 
         # instance variables
         self.transmission_time = g_timestamp  # set to now as soon as object is initialised it is transmitted
@@ -1894,15 +1936,26 @@ for node_id in g_node_id_dict:
 
 ## Begin Simulator
 # timestamp initialised at 0 at top of file
-max_timestamp = 28  # debug
-# max_timestamp = gen_utils.get_int_descision("How many ticks should the simulator run for?", 0)
+max_timestamp = 190  # debug
+#max_timestamp = gen_utils.get_int_descision("How many ticks should the simulator run for?", 0)
 
 for tick in range(1, max_timestamp):
 
     # first set GCL to timestamp
     if g_timestamp in g_offline_GCL:  # if time is present, update state, else we are in a range so leave it
         # TODO : somehow incorperate active GCL into this unless that is just for emergency queue
-        g_current_GCL_state = g_offline_GCL[g_timestamp]
+
+        g_current_GCL_state = g_offline_GCL[g_timestamp]  # change state
+
+        # if we have reached the bottom of the GCL, start again from the top
+        if g_current_GCL_state == "REPEAT":
+            new_gcl = {}
+            for timestamp in g_offline_GCL:  # create new keys of now + original_GCL_entry, to simulate restart of list
+                new_gcl[int(timestamp)+int(g_timestamp)] = g_offline_GCL[timestamp]
+
+            # make this new gcl the official g_offline_GCL to preserve the g_timestamp
+            g_offline_GCL = new_gcl
+            g_current_GCL_state = g_offline_GCL[g_timestamp]  # change state
 
 
     # check each ES for traffic to send based on its traffic sending rules

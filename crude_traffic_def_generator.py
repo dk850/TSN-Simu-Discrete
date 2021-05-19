@@ -107,7 +107,7 @@ class Generator():
             # if we are allowed to set a destination set that here too
             if dest_set_mode:
                 dest = str(gen_utils.get_int_descision("Input destination for Traffic " + \
-                                                       str(traffic_id)+" (0 for random)", 0))
+                                                       str(traffic_id)+" (0 for random):", 0))
             else:
                 # 0 can never be an end station as it is always the controller so this signifies random
                 dest = "0"  # default to 0
@@ -115,7 +115,7 @@ class Generator():
             # if we are allowed to set a size for the packets set that here too
             if size_set_mode:
                 size = str(gen_utils.get_int_descision("Input packet size for Traffic " + \
-                                                       str(traffic_id)+" (0 for random between 1 and 64)", 0))
+                                                       str(traffic_id)+" (0 for random between 1 and 64):", 0))
                 if size == 0:
                     size = random.randInt(1, 64)
                     print("Traffic", str(traffic_id), "packet size randomly set to", str(size))
