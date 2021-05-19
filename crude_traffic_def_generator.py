@@ -68,7 +68,7 @@ class Generator():
         output_xml = etree.Element("Traffic_Definition_Root")  # default root node
 
         # get amount of traffic types (at least 1)
-        traffics_count = gen_utils.get_int_descision("How manny generic Traffic Definitions would you like to create?", 1)
+        traffics_count = gen_utils.get_int_descision("How many generic Traffic Definitions would you like to create?", 1)
 
 
         # loop for all types the user wants to define

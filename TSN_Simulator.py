@@ -156,50 +156,38 @@ class End_Station(Node):
         if len(self.ingress_traffic) == 0:  # do nothing if queue empty
             return 0
 
-
-        if len(self.ingress_traffic) > 1:  # give warning if we read more than 1 packet at a time (we probably shouldn't be able to)
-            print("WARNING: Performing burst read of all", len(self.ingress_traffic), \
-                  "packets in ES", "\""+str(self.id)+"\"", "ingress queue")
-
-
         # loop over all packets in ingress queue
+        final_ingress = self.ingress_traffic.copy()
         for packet in self.ingress_traffic:
-            packet.set_arrival_time(g_timestamp)
-            g_packet_latencies.append(int(packet.arrival_time)-int(packet.transmission_time))  # add latency to global list
+
+            # can only digest packet from ingress if the entire packet is present
+            if packet.arrival_time == -1:  # if it is the packets first tick in the ingress queue of the ES
+                if SIM_DEBUG:  # debug
+                    print("[T", str(g_timestamp).zfill(3)+"]", "Found", \
+                          "start of "+str(packet.__class__.__name__)+" packet \""+str(packet.name)+"\" size \""+str(packet.size)+"\"" \
+                          if math.ceil(int(packet.size) / SENDING_SIZE_CAPCITY) > 1 else \
+                          str(packet.__class__.__name__)+" packet \""+str(packet.name)+"\"" \
+                          , "from ES", "\""+str(packet.source)+"\"", "in destination ingress queue of ES", "\""+str(self.id)+"\"")
+
+                packet.set_arrival_time(g_timestamp)  # add queue enter timestamp
+
+            # then check the packets size compared to how much we can accept per tick
+            if ((g_timestamp - packet.arrival_time) + 1) != math.ceil(int(packet.size) / SENDING_SIZE_CAPCITY):
+                continue  # if it hasnt fully arrived we cant digest it. Try again next tick, move on to other packets
+            # else properly ingest the packet into the correct inner queue
+
+            # add latency to global list including time ES was busy receiving packet. i.e. latency is start of send until complete receive
+            g_packet_latencies.append(int(packet.arrival_time)-int(packet.transmission_time) + \
+                                      int(math.ceil(int(packet.size) / SENDING_SIZE_CAPCITY)) )
+            final_ingress.remove(packet)  # remove from copy of list so we dont alter the for loop
 
             if SIM_DEBUG:  # for debug
-                print("[T", str(g_timestamp).zfill(3)+"]", "Recieved", str(packet.__class__.__name__), "packet", \
+                print("[T", str(g_timestamp).zfill(3)+"]", "Digested", str(packet.__class__.__name__), "packet", \
                       "\""+str(packet.name)+"\"", "from source ES", "\""+str(packet.source)+"\"", \
                       "at final destination ES", "\""+str(self.id)+"\"", "with latency", \
                       "\""+str(int(packet.arrival_time)-int(packet.transmission_time))+"\"")
 
-        self.ingress_traffic = []  # clear queue as we have ingested everything. Real world would act on packet here - maybe send something back
-
-        return 1
-
-
-    # function to send traffic from this nodes egress queue to parent switch
-    def flush_egress(self):
-
-        if len(self.egress_traffic) > 1:  # give warning if we are sending more than one packet (probably shouldn't be able to do this)
-            print("WARNING: Egress queue of ES:", str(self.id), "has length:", str(len(self.egress_traffic))+".", \
-                  "Burst sending all packets to parent Switch:", str(self.parent_id))
-
-
-        # if not busy
-        if self.busy == 0:
-
-            # loop over all packets in egress queue
-            for packet in self.egress_traffic:
-                g_node_id_dict[self.parent_id].RX_packet(packet)  # send the packet to the parent switches ingress queue
-                #self.busy = math.ceil(packet_size / SENDING_SIZE_CAPCITY)  # how many ticks the node will be busy for
-
-                if SIM_DEBUG:  # for debug
-                    print("[T", str(g_timestamp).zfill(3)+"]", "Sending", str(packet.__class__.__name__), "Traffic", \
-                          "\""+str(packet.name)+"\"", "to parent Switch", "\""+str(self.parent_id)+"\"", \
-                          "from egress queue of ES", "\""+str(self.id)+"\"")
-
-            self.egress_traffic = []  # empty queue as we have sent all packets
+        self.ingress_traffic = final_ingress  # update queue with packets removed. Real world would act on packet here - maybe send something back
 
         return 1
 
@@ -209,8 +197,7 @@ class End_Station(Node):
 
         if SIM_DEBUG:  # for debug
             print("[T", str(g_timestamp).zfill(3)+"]", "Adding newly generated", str(self.t_type), "packet", \
-                  "\""+str(packet.name)+"\"", "of size", "\""+str(self.t_size)+"\"", "to egress queue of ES", \
-                  "\""+str(self.id)+"\"")
+                  "\""+str(packet.name)+"\"", "to egress queue of ES", "\""+str(self.id)+"\"")
 
         # make sure packet matches a type defined at the start of the program
         if packet.__class__.__name__ in e_queue_type_names:
@@ -221,6 +208,31 @@ class End_Station(Node):
             # can trigger error correction function here
             print("ERROR: Attempted to add a non-traffic object to the egress queue of ES", "\""+str(self.id)+"\"")
             return 0
+
+
+    # function to send traffic from this nodes egress queue to parent switch
+    def flush_egress(self):
+
+        # if busy decrease the busy counter
+        if self.busy > 0:
+            self.busy -= 1
+
+        # if not busy
+        if self.busy == 0:
+
+            # loop over all packets in egress queue
+            for packet in self.egress_traffic:
+                g_node_id_dict[self.parent_id].RX_packet(packet)  # send the packet to the parent switches ingress queue
+                self.busy = math.ceil(int(packet.size) / SENDING_SIZE_CAPCITY)  # how many ticks the node will be busy for
+                self.egress_traffic.remove(packet)  # remove this packet from queue as it is being sent
+
+                if SIM_DEBUG:  # for debug
+                    print("[T", str(g_timestamp).zfill(3)+"]", "Sending", str(packet.__class__.__name__), "packet", \
+                          "\""+str(packet.name)+"\"", "of size", "\""+str(self.t_size)+"\"", "to parent Switch", \
+                          "\""+str(self.parent_id)+"\"", "from egress queue of ES", "\""+str(self.id)+"\"")
+
+                return 1
+        return 1
 
 
     # function to be used within the packet generator that chooses when to generate a packet depending on type (simulate sporadicness)
@@ -365,15 +377,25 @@ class Switch(Node):
         if len(self.ingress_traffic) > 1:
             random.shuffle(self.ingress_traffic)
 
-        # each packet gets added to the relevant queue within the switch
+        # each packet gets added to the relevant queue within the switch if the entire packet is present
         final_ingress = self.ingress_traffic.copy()  # use a copy of this so we do not alter the live list when removing packets
         for packet in self.ingress_traffic:
-            if SIM_DEBUG:  # debug
-                print("[T", str(g_timestamp).zfill(3)+"]", "Found", packet.__class__.__name__, "Traffic", "\""+str(packet.name)+"\"", \
-                      "from ES", "\""+str(packet.source)+"\"", "in ingress queue of Switch", "\""+str(self.id)+"\"")
 
-            # add queue enter timestamp
-            packet.set_queue_enter(g_timestamp)
+            # can only move packet from ingress into its respective queue if the entire packet is present
+            if packet.queue_enter == -1:  # if it is the packets first tick in the ingress queue
+                if SIM_DEBUG:  # debug
+                    print("[T", str(g_timestamp).zfill(3)+"]", "Found", \
+                          "start of "+str(packet.__class__.__name__)+" packet \""+str(packet.name)+"\" size \""+str(packet.size)+"\"" \
+                          if math.ceil(int(packet.size) / SENDING_SIZE_CAPCITY) > 1 else \
+                          str(packet.__class__.__name__)+" packet \""+str(packet.name)+"\"" \
+                          , "from ES", "\""+str(packet.source)+"\"", "in ingress queue of Switch", "\""+str(self.id)+"\"")
+
+                packet.set_queue_enter(g_timestamp)  # add queue enter timestamp
+
+            # then check the packets size compared to how much we can accept per tick
+            if ((g_timestamp - packet.queue_enter) + 1) != math.ceil(int(packet.size) / SENDING_SIZE_CAPCITY):
+                continue  # if it hasnt fully arrived we cant move this packet to its inner queue. Try again next tick, move on to other packets
+            # else properly ingest the packet into the correct inner queue
 
             # ST packets
             if packet.__class__.__name__ == "ST":
@@ -562,7 +584,18 @@ class Switch(Node):
 
         # now we send highest priority packet from the list of available packets
         if len(self.available_packets) == 0:  # if available packets queue empty, do nothing
+
+            if self.busy != 0:
+                self.busy -= 1  # dont forget to decrese busy counter if we are still working
             return 0
+
+        if self.busy != 0:  # if we are still sending a packet
+            self.busy -= 1
+
+        if self.busy == 0:  # if the packet is now fully sent, can continue
+            pass
+        else:
+            return 0  # else we cant send a packet
 
         # find highest priority packet out of all packets available to be sent
         packet_to_send = self.available_packets[0]  # start from FIRST in queue to mimic priority ordering
@@ -578,9 +611,9 @@ class Switch(Node):
         queue_number = packet_to_send[0]
         if queue_type == "ST":
             # ST traffic could be in emergency queue, check to see which queue the packet it is
-            if len(packet_to_send) == 3:  # emergency queue
+            if len(packet_to_send) == 3:  # an Emergency queue
                 self.EM_queue[queue_number].remove(packet_to_send[1])
-            else:
+            else:  # an ST queue
                 self.ST_queue[queue_number].remove(packet_to_send[1])
         elif queue_type == "Sporadic_Hard":
             self.SH_queue[queue_number].remove(packet_to_send[1])
@@ -599,6 +632,10 @@ class Switch(Node):
         self.packets_transmitted += 1
         self.recalculate_packet_delay(packet)
 
+        if self.busy != 0:
+            print("ERROR: Switch", "\""+str(self.id)+"\"", "is busy and cannot send new packets")
+            return 0
+
         # get hop from routing table
         hop = -1
         for route in self.local_routing_table:
@@ -612,15 +649,11 @@ class Switch(Node):
                   "in egress queue of Switch", "\""+str(self.id)+"\"", \
                   "to node ID", "\""+str(packet.destination)+"\"" if int(hop) == int(self.id) else "\""+str(hop)+"\"")
 
-        # NOTE : Preemption can be implemented here maybe by setting some sort of "SENDING" flag for this switch
-        #          and if the flag is set, it sends another "frame" to the destination unless it is beeing preempted
-        #          would have to implement this other function in the main body of the simulator
-        # NOTE : Could also do premption by renaming these packets into frames and the ES generates multiple frames
-        #          this way, the switch always sends the highest priority frame it has, which is basically preemption
-
         # if hop is this switch we can send packet directly to the ES else we send to next switch
         g_node_id_dict[int(packet.destination) if int(hop) == int(self.id) else int(hop)].RX_packet(packet)
 
+        # set this switch to be busy depending on the size of the packet to send, busy ticks decrese in egress_packets
+        self.busy = math.ceil(int(packet.size) / SENDING_SIZE_CAPCITY)
 
         return 1
 
@@ -734,7 +767,7 @@ class Packet(Traffic):
         self.priority = priority
         self.name = name
         self.offset = offset
-        self.packet_size = size
+        self.size = size
 
         # instance variables
         self.transmission_time = g_timestamp  # set to now as soon as object is initialised it is transmitted
@@ -1933,7 +1966,7 @@ print(g_queueing_delays)
 ################### DEMO  CODE ###################
 ##################################################
 
-if 1:
+if 0:
     print()
     print()
     print("DEMO CODE AS FOLLOWS:")
