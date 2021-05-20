@@ -1711,8 +1711,8 @@ def parse_traffic_mapping_file(f_traffic_mapping):
 
             # else it is error free and can be applied to the node
             if g_node_id_dict[es].set_traffic_rules(g_generic_traffics_dict[str(tr)]) == 0:
-                print("ERROR: Failed to apply traffic rule", "\""+str(tr)+": "+str(g_generic_traffics_dict[str(tr)])+"\"" \
-                      , "to ES", "\""+str(es)+"\"")
+                print("ERROR: Failed to apply traffic rule", "\""+str(tr)+": "+str(g_generic_traffics_dict[str(tr)])+"\"", \
+                      "to ES", "\""+str(es)+"\"")
                 return 0  # if failure within node
 
             es_ids.append(es)  # add used ES ID to list to make sure there are no duplicates
@@ -2002,6 +2002,8 @@ def traffic_mapping_parse_wrapper(traffic_mapping_file):
             t_id = gen_utils.get_restricted_descision("What generic Traffic ID should End_Station " + \
                                                       "(ID: "+str(node_id)+")"+" get?", traffic_ids)
             if g_node_id_dict[node_id].set_traffic_rules(g_generic_traffics_dict[t_id])  == 0:
+                print("ERROR: Failed to apply traffic rule", "\""+str(t_id)+": "+str(g_generic_traffics_dict[t_id])+"\"", \
+                      "to ES", "\""+str(node_id)+"\"")
                 return 0  # if failure
 
     return 1
