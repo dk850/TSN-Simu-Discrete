@@ -25,6 +25,7 @@ import crude_traffic_def_generator as traffic_def_gen  # traffic definition gene
 g_timestamp = 0
 g_generic_traffics_dict = {}  # dictionary of generic traffic rules from file - key is ID
 g_node_id_dict = {}  # key is node id, value is node object
+g_original_GCL = {}  # store original GCL for long simulations
 g_offline_GCL = {}  # key is timestamp, value is the gate state at that timestamp
 g_current_GCL_state = ""  # state of GCL shared across entire simulator, to be changed according to GCL and timestamp
 # should only change gate state if we have a key for that timestamp, else leave it as previous value
@@ -48,15 +49,24 @@ e_es_types = ["sensor", "control"]  # possible end station types?
 e_queue_schedules = ["FIFO"]  # possible queue schedules
 e_queue_type_names = ["ST", "Emergency", "Sporadic_Hard", "Sporadic_Soft", "BE"]  # possible queue types
 
-# specify file paths and names
-# TODO : Have option to input file name if none provided here
+
+# specify file paths and names. These stay blank and if none provided the simulator asks the user to generate
+network_topo_file = ""
+queue_definition_file = ""
+GCL_file = ""
+traffic_definition_file = ""
+traffic_mapping_file = ""
+
+# manually specify
 using = "example"
 using = "M"
-files_directory       = "simulator_files\\"
+files_directory         = "simulator_files\\"
 network_topo_file       = files_directory+using+"_network_topology.xml"
 queue_definition_file   = files_directory+using+"_queue_definition.xml"
 GCL_file                = files_directory+using+"_gcl.txt"
-traffic_definition_file = files_directory+using+"_trafffic_definition.xml"
+traffic_definition_file = files_directory+using+"_traffic_definition.xml"
+traffic_mapping_file    = files_directory+using+"_traffic_mapping.txt"
+
 
 # generator parameters
 SENDING_SIZE_CAPCITY = 16  # size (in bytes) of frames able to be sent in 1 tick
@@ -145,7 +155,7 @@ class End_Station(Node):
         # BE
         elif self.t_type == "BE":
             if self.generate():  # returns true when its time to generate a packet
-                packet = Best_Effort(self.id, self.t_dest, self.t_size, self.t_name, self.t_offset)
+                packet = BE(self.id, self.t_dest, self.t_size, self.t_name, self.t_offset)
                 self.egress(packet)
 
         # else unrecognised packet
@@ -433,6 +443,7 @@ class Switch(Node):
 
                 packet.set_queue_enter(g_timestamp)  # add queue enter timestamp
 
+
             # then check the packets size compared to how much we can accept per tick
             if ((g_timestamp - packet.queue_enter) + 1) != math.ceil(int(packet.size) / SENDING_SIZE_CAPCITY):
                 continue  # if it hasnt fully arrived we cant move this packet to its inner queue. Try again next tick, move on to other packets
@@ -531,7 +542,7 @@ class Switch(Node):
                 if len(self.ST_queue[i]) != 0:
                     print("[T", str(g_timestamp).zfill(3)+"]", "["+str(self.queue_definition.ST_schedule)+"]", "Adding ST packet", \
                           "\""+str(self.available_packets[-1][1].name)+"\"", "from ES", "\""+str(self.available_packets[-1][1].source)+"\"", \
-                          "to \"available_packets\" temp queue of Switch", "\""+str(self.id)+"\"")
+                          "to \"available_packets\" candidate queue of Switch", "\""+str(self.id)+"\"")
 
 
         # Emergency queues
@@ -553,7 +564,7 @@ class Switch(Node):
                 if len(self.EM_queue[i]) != 0:
                     print("[T", str(g_timestamp).zfill(3)+"]", "["+str(self.queue_definition.emergency_schedule)+"]", "Adding Emergency packet", \
                           "\""+str(self.available_packets[-1][1].name)+"\"", "from ES", "\""+str(self.available_packets[-1][1].source)+"\"", \
-                          "to \"available_packets\" temp queue of Switch", "\""+str(self.id)+"\"")
+                          "to \"available_packets\" candidate queue of Switch", "\""+str(self.id)+"\"")
 
         # SH queues
         for i in range(len(self.SH_queue)):
@@ -573,7 +584,7 @@ class Switch(Node):
                 if len(self.SH_queue[i]) != 0:
                     print("[T", str(g_timestamp).zfill(3)+"]", "["+str(self.queue_definition.sporadic_hard_schedule)+"]", "Adding Sporadic_Hard packet", \
                           "\""+str(self.available_packets[-1][1].name)+"\"", "from ES", "\""+str(self.available_packets[-1][1].source)+"\"", \
-                          "to \"available_packets\" temp queue of Switch", "\""+str(self.id)+"\"")
+                          "to \"available_packets\" candidate queue of Switch", "\""+str(self.id)+"\"")
 
 
         # SS queues
@@ -594,7 +605,7 @@ class Switch(Node):
                 if len(self.SS_queue[i]) != 0:
                     print("[T", str(g_timestamp).zfill(3)+"]", "["+str(self.queue_definition.sporadic_soft_schedule)+"]", "Adding Sporadic_Soft packet", \
                           "\""+str(self.available_packets[-1][1].name)+"\"", "from ES", "\""+str(self.available_packets[-1][1].source)+"\"", \
-                          "to \"available_packets\" temp queue of Switch", "\""+str(self.id)+"\"")
+                          "to \"available_packets\" candidate queue of Switch", "\""+str(self.id)+"\"")
 
 
         # BE queues
@@ -615,7 +626,7 @@ class Switch(Node):
                 if len(self.BE_queue[i]) != 0:
                     print("[T", str(g_timestamp).zfill(3)+"]", "["+str(self.queue_definition.BE_schedule)+"]", "Adding Best_Effort packet", \
                           "\""+str(self.available_packets[-1][1].name)+"\"", "from ES", "\""+str(self.available_packets[-1][1].source)+"\"", \
-                          "to \"available_packets\" temp queue of Switch", "\""+str(self.id)+"\"")
+                          "to \"available_packets\" candidate queue of Switch", "\""+str(self.id)+"\"")
 
         return 1
 
@@ -691,6 +702,7 @@ class Switch(Node):
                   "to node ID", "\""+str(packet.destination)+"\"" if int(hop) == int(self.id) else "\""+str(hop)+"\"")
 
         # if hop is this switch we can send packet directly to the ES else we send to next switch
+        packet.queue_enter = -1  # reset this in case we are moveing to another switch
         g_node_id_dict[int(packet.destination) if int(hop) == int(self.id) else int(hop)].RX_packet(packet)
 
         # set this switch to be busy depending on the size of the packet to send, busy ticks decrese in egress_packets
@@ -800,7 +812,6 @@ class Traffic():
 
 
 # define packets that belong to the traffic class (frame -> packet -> traffic)
-# TODO : may need to have data in here somehow, or in frames
 class Packet(Traffic):
 
     def __init__(self, source, destination, priority, size, name="unnamed", offset="0"):
@@ -892,7 +903,7 @@ class Sporadic_Soft(NonST):
 
 
 # best effort type of nonST traffic
-class Best_Effort(NonST):
+class BE(NonST):
 
     def __init__(self, source, destination, size, name="unnamed", offset="0"):
         super().__init__(source, destination, 4, 0, 0, size, name, offset)  # priority 4, no timing constraints
@@ -1014,6 +1025,11 @@ def bullk_parse(network_topo_file, queue_definition_file, GCL_file, traffic_defi
 
     # traffic definition
     if traffic_parse_wrapper(traffic_definition_file) == 0:
+        return 0
+
+
+    # traffic mapping
+    if traffic_mapping_parse_wrapper(traffic_mapping_file) == 0:
         return 0
 
 
@@ -1263,6 +1279,7 @@ def parse_routing_table(f_network_topo):
     return 1
 
 
+
 # function to parse the queue definition file
 def parse_queue_definition(f_queue_def, debug=0):
 
@@ -1391,7 +1408,7 @@ def parse_queue_definition(f_queue_def, debug=0):
 # function to error check and parse the GCL
 def parse_GCL(f_GCL):
 
-    global g_offline_GCL
+    global g_offline_GCL, g_original_GCL
 
     # open gcl file
     f_GCL = Path(f_GCL)  # convert string filename to actual file object
@@ -1451,7 +1468,7 @@ def parse_GCL(f_GCL):
                     print("ERROR: Timestamp value at line", "\""+str(line)+"\"", "is not sequential")
                     return 0
 
-
+    g_original_GCL = g_offline_GCL  # set original GCL for later if everything is a success
     return 1
 
 
@@ -1640,6 +1657,77 @@ def parse_traffic_definition(f_traffic_def, debug=0):
 
 
 
+# function to error check and parse an optional traffic mapping file
+def parse_traffic_mapping_file(f_traffic_mapping):
+
+    # open traffic mapping file
+    f_traffic_mapping = Path(f_traffic_mapping)  # convert string filename to actual file object
+    with f_traffic_mapping.open() as f:
+        f_lines = f.read().splitlines()  # put entire file into an ordered list
+
+
+        ## Get lists of valid IDs from already parsed files
+        # get list of actual present end stations
+        topo_es_ids = []
+        for node_id in g_node_id_dict:
+            if g_node_id_dict[node_id].node_type == "End_Station":  # get end station from global id list
+                topo_es_ids.append(int(node_id))
+
+        # get list of actual traffic rule IDs
+        traffic_rule_ids = []
+        for rule_id in g_generic_traffics_dict:
+            traffic_rule_ids.append(int(rule_id))
+
+
+        # error check and parse the file
+        es_ids = []  # store ES IDs to make sure they only appear once
+        for rule in f_lines:
+
+            if "," not in rule:  # must contain comma
+                print("ERROR: Traffic mapping rule", "\""+str(rule)+"\"", "invalid. Must contain a comma \",\"")
+                return 0
+
+            mapping = rule.replace(" ", "")  # strip spaces if any
+            mapping = mapping.split(",")  # split on comma
+
+            if len(mapping) != 2:  # check there are only 2 IDs in the list
+                print("ERROR: Traffic mapping rule", "\""+str(rule)+"\"", "must only contain 2 IDs")
+                return 0
+
+            # put into easy to read variables
+            tr = int(mapping[0])
+            es = int(mapping[1])
+
+            if es not in topo_es_ids:  # make sure ES ID in rule is valid
+                print("ERROR: ES ID in traffic mapping rule", "\""+str(rule)+"\"", "is invalid and does not match Network Topology")
+                return 0
+            if tr not in traffic_rule_ids:  # make sure traffic rule ID in rule is valid
+                print("ERROR: Traffic Definition ID in traffic mapping rule", "\""+str(rule)+"\"", \
+                      "is invalid and does not match any IDs in the Traffic Definition File")
+                return 0
+            if es in es_ids:  # make sure ES ID not already present in the file
+                print("ERROR: Duplicate ES ID found in rule", "\""+str(rule)+"\"")
+                return 0
+
+            # else it is error free and can be applied to the node
+            if g_node_id_dict[es].set_traffic_rules(g_generic_traffics_dict[str(tr)]) == 0:
+                print("ERROR: Failed to apply traffic rule", "\""+str(tr)+": "+str(g_generic_traffics_dict[str(tr)])+"\"" \
+                      , "to ES", "\""+str(es)+"\"")
+                return 0  # if failure within node
+
+            es_ids.append(es)  # add used ES ID to list to make sure there are no duplicates
+
+
+        # all rules from file applied - make sure each ES has traffic rule by checking length
+        if len(es_ids) != len(topo_es_ids):
+            print("ERROR: Not every end station has an associated traffic rule")
+            return 0
+
+        # no errors
+        return 1
+
+
+
 ## WRAPPERS
 # network topo parser wrapper
 def network_topo_parse_wrapper(network_topo_file):
@@ -1654,30 +1742,34 @@ def network_topo_parse_wrapper(network_topo_file):
             print("Successfully parsed network topology file:", "\""+network_topo_file+"\"")
             return 1
     else:
-        print("ERROR: Network topology not found:", "\""+network_topo_file+"\"")
+        print("WARNING: Network topology not", "found." if len(network_topo_file) == 0 else "found: \""+network_topo_file+"\"")
 
         # see if the user wants to generate a new topology
         if gen_utils.get_YesNo_descision("Would you like to create a Network Topology?"):
-            if gen_utils.get_YesNo_descision("Would you like to use the same name ("+str(network_topo_file)+")?"):  # keep same filename
-                network_topo_gen.generate(network_topo_file, MAX_NODE_COUNT)  # call generator
-                return network_topo_parse_wrapper(network_topo_file)  # re-parse
+            if len(network_topo_file) != 0:
+                if gen_utils.get_YesNo_descision("Would you like to use the same name ("+str(network_topo_file)+")?"):  # keep same filename
+                    network_topo_gen.generate(network_topo_file, MAX_NODE_COUNT)  # call generator
+                    print()
+                    return network_topo_parse_wrapper(network_topo_file)  # re-parse
 
             else:  # generate new topo with different filename
-                new_filename = "simulator_files\\"
+                new_filename = files_directory
                 new_filename += gen_utils.get_str_descision("Enter a filename for the Network Topology (do NOT include .xml)", \
                                                             restricted_only=True)
                 new_filename += ".xml"
                 print("Accepted filename:", new_filename)
                 network_topo_gen.generate(new_filename, max_nodes=MAX_NODE_COUNT)  # call generator
+                print()
                 return (new_filename, network_topo_parse_wrapper(new_filename))  # re-parse and return new filename for routing table parse
 
         # see if the user wants to search for a different filename
         elif gen_utils.get_YesNo_descision("Would you like to look for a different Topology filename?"):
-            new_filename = "simulator_files\\"
+            new_filename = files_directory
             new_filename += gen_utils.get_str_descision("Enter a filename for the Network Topology (do NOT include .xml)", \
                                                         restricted_only=True)
             new_filename += ".xml"
             print("Trying filename: \""+new_filename+"\"")
+            print()
             return (new_filename, network_topo_parse_wrapper(new_filename))
 
         # if no new file generated and the user doesnt want to search for one then
@@ -1699,7 +1791,8 @@ def routing_table_parse_wrapper(network_topo_file):
             print("Successfully parsed routing table from file:", "\""+network_topo_file+"\"")
             return 1
     else:
-        print("ERROR: Network topology file not found:", "\""+network_topo_file+"\". Unable to parse routing table")
+        print("ERROR: Network topology file not", "found." if len(network_topo_file) == 0 else "found: \""+network_topo_file+"\"", \
+              "Unable to parse routing table")
         return 0
 
 
@@ -1716,14 +1809,15 @@ def GCL_parse_wrapper(GCL_file):
             print("Successfully parsed GCL file:", "\""+GCL_file+"\"")
             return 1
     else:
-        print("ERROR: GCL not found:", "\""+GCL_file+"\"")
+        print("WARNING: GCL not", "found." if len(GCL_file) == 0 else "found: \""+GCL_file+"\"")
 
         # see if the user wants to search for another file
         if gen_utils.get_YesNo_descision("Would you like to look for a different GCL filename?"):
-            new_filename = "simulator_files\\"
+            new_filename = files_directory
             new_filename += gen_utils.get_str_descision("Enter a filename for the GCL (DO include file extension)", \
                                                         restricted_only=True)
             print("Trying filename: \""+new_filename+"\"")
+            print()
             return GCL_parse_wrapper(new_filename)
 
         # else
@@ -1745,18 +1839,22 @@ def queue_def_parse_wrapper(queue_definition_file):
             print("Successfully parsed queue definition file:", "\""+queue_definition_file+"\"")
             return 1
     else:
-        print("ERROR: Queue Definition not found:", "\""+queue_definition_file+"\"")
+        print("WARNING: Queue Definition not", "found." if len(queue_definition_file) == 0 else "found: \""+queue_definition_file+"\"")
 
         if gen_utils.get_YesNo_descision("Would you like to create a new Queue Definition?"):
 
             # see if user wants to change the filename
-            new_filename_in_use = False
+            if len(queue_definition_file) == 0:
+                new_filename_in_use = True  # must use a new flename if one not provided
+            else:
+                if gen_utils.get_YesNo_descision("Would you like to use the current filename ("+queue_definition_file+")?"):
+                    new_filename_in_use = False  # do nothing so we can use the same filename
+                else:
+                    new_filename_in_use = True  # signify new filename
+
             new_filename = ""
-            if gen_utils.get_YesNo_descision("Would you like to use the current filename ("+queue_definition_file+")?"):
-                new_filename_in_use = False  # do nothing so we can use the same filename
-            else:  # get new filename
-                new_filename_in_use = True
-                new_filename = "simulator_files\\"
+            if new_filename_in_use:  # get new filename
+                new_filename = files_directory
                 new_filename += gen_utils.get_str_descision("Enter a filename for the Queue Definition file (do NOT include .xml)", \
                                                             restricted_only=True)
                 new_filename += ".xml"
@@ -1774,28 +1872,33 @@ def queue_def_parse_wrapper(queue_definition_file):
 
                 if new_filename_in_use:  # call queue def generator with new filename and current IDs and try to reparse
                     queue_def_gen.generate(new_filename, MAX_NODE_COUNT, id_list_to_send, e_queue_schedules)
+                    print()
                     return queue_def_parse_wrapper(new_filename)
                 else:  # call queue def generator with old filename and current IDs and try to reparse
                     queue_def_gen.generate(queue_definition_file, MAX_NODE_COUNT, id_list_to_send, e_queue_schedules)
+                    print()
                     return queue_def_parse_wrapper(queue_definition_file)
 
 
             else:
                 if new_filename_in_use:  # call queue def generator with new filename and no IDs and try to reparse
                     queue_def_gen.generate(new_filename, MAX_NODE_COUNT, allowed_schedules=e_queue_schedules)
+                    print()
                     return queue_def_parse_wrapper(new_filename)
                 else:  # call queue def generator with old filename and no IDs and try to reparse
                     queue_def_gen.generate(queue_definition_file, MAX_NODE_COUNT, allowed_schedules=e_queue_schedules)
+                    print()
                     return queue_def_parse_wrapper(queue_definition_file)
 
 
         # if user doesnt want to create a new one - see if they want to search for a different one
         elif gen_utils.get_YesNo_descision("Would you like to look for a different Queue Definition filename?"):
-            new_filename = "simulator_files\\"
+            new_filename = files_directory
             new_filename += gen_utils.get_str_descision("Enter a filename for the Queue Definition (do NOT include .xml)", \
                                                         restricted_only=True)
             new_filename += ".xml"
             print("Trying filename: \""+new_filename+"\"")
+            print()
             return queue_def_parse_wrapper(new_filename)  # dont need to return the new filename as nothing else needs it
 
         # if no new definition generated and the user doesnt want to search for one then:
@@ -1804,7 +1907,7 @@ def queue_def_parse_wrapper(queue_definition_file):
 
 
 
-# GCL parser wrapper
+# traffic definition parser wrapper
 def traffic_parse_wrapper(traffic_definition_file):
 
     # parse the generic types of traffic our simulator will be able to send
@@ -1817,40 +1920,91 @@ def traffic_parse_wrapper(traffic_definition_file):
             print("Successfully parsed traffic definition file:", "\""+traffic_definition_file+"\"")
             return 1
     else:
-        print("ERROR: Traffic definition not found:", "\""+traffic_definition_file+"\"")
+        print("WARNING: Traffic definition not", "found." if len(traffic_definition_file) == 0 else "found: \""+traffic_definition_file+"\"")
 
         # see if user wants to create a new file
         if gen_utils.get_YesNo_descision("Would you like to create a new Traffic Definition?"):
 
             # see if user wants to change the filename
-            if gen_utils.get_YesNo_descision("Would you like to use the current filename ("+traffic_definition_file+")?"):
-                traffic_def_gen.generate(traffic_definition_file)  # generate
-                return traffic_parse_wrapper(traffic_definition_file)  # attempt to re-parse
+            if len(traffic_definition_file) != 0:
+                if gen_utils.get_YesNo_descision("Would you like to use the current filename ("+traffic_definition_file+")?"):
+                    traffic_def_gen.generate(traffic_definition_file)  # generate
+                    print()
+                    return traffic_parse_wrapper(traffic_definition_file)  # attempt to re-parse
 
-            else:  # get new filename
-                new_filename = "simulator_files\\"
-                new_filename += gen_utils.get_str_descision("Enter a filename for the Queue Definition file (do NOT include .xml)", \
-                                                            restricted_only=True)
-                new_filename += ".xml"
-                print("Accepted filename:", new_filename)
+            # else get new filename
+            new_filename = files_directory
+            new_filename += gen_utils.get_str_descision("Enter a filename for the Traffic Definition file (do NOT include .xml)", \
+                                                        restricted_only=True)
+            new_filename += ".xml"
+            print("Accepted filename:", new_filename)
 
-                traffic_def_gen.generate(new_filename)  # generate
-                return traffic_parse_wrapper(new_filename)  # attempt to re-parse
+            traffic_def_gen.generate(new_filename)  # generate
+            print()
+            return traffic_parse_wrapper(new_filename)  # attempt to re-parse
 
 
         # if user doesnt want to create a new one - see if they want to search for a different one
         elif gen_utils.get_YesNo_descision("Would you like to look for a different Traffic Definition filename?"):
-            new_filename = "simulator_files\\"
+            new_filename = files_directory
             new_filename += gen_utils.get_str_descision("Enter a filename for the Traffic Definition (do NOT include .xml)", \
                                                         restricted_only=True)
             new_filename += ".xml"
             print("Trying filename: \""+new_filename+"\"")
+            print()
             return traffic_parse_wrapper(new_filename)  # dont need to return the new filename as nothing else needs it
 
 
         # else
         print("ERROR: Cannot run simulator without a valid Traffic Definition file")
         return 0
+
+
+
+# traffic mapping parser wrapper
+def traffic_mapping_parse_wrapper(traffic_mapping_file):
+
+    # check if the file is present
+    f = Path(traffic_mapping_file)
+    if f.is_file():
+        if parse_traffic_mapping_file(traffic_mapping_file) == 0:
+            print("ERROR: In file:", "\""+traffic_mapping_file+"\"")
+            # don't return here so it goes on to specify manually
+        else:
+            print("Successfully parsed traffic mapping file", "\""+str(traffic_mapping_file)+"\"")
+            return 1
+    else:
+        # if file not present
+        print("WARNING: Traffic mapping file not", "found." if len(traffic_mapping_file) == 0 else "found: \""+traffic_mapping_file+"\"")
+
+        # else user doesnt want to make a new file
+        if gen_utils.get_YesNo_descision("Would you like to look for a different Traffic Mapping file filename?"):
+            new_filename = files_directory
+            new_filename += gen_utils.get_str_descision("Enter a filename for the Traffic Mapping file (DO include file extension)", \
+                                                        restricted_only=True)
+            print("Trying filename: \""+new_filename+"\"")
+            print()
+            return traffic_mapping_parse_wrapper(new_filename)  # dont need to return the new filename as nothing else needs it
+
+
+    # else
+    print()
+    print("WARNING: Traffic Mapping required. User must manually specify mapping.")
+    print("Available Traffic types from the Traffic Definition File and their ID:")
+    print([("ID: "+str(key_id), "Type: "+str(g_generic_traffics_dict[key_id]["type"]), \
+            "Dest: "+str(g_generic_traffics_dict[key_id]["destination_id"])) \
+           for key_id in g_generic_traffics_dict])
+
+    # ask user which end station gets which traffic ruleset
+    traffic_ids = [id for id in g_generic_traffics_dict]  # get list of just the ID
+    for node_id in g_node_id_dict:
+        if g_node_id_dict[node_id].node_type == "End_Station":  # get end station from global id list
+            t_id = gen_utils.get_restricted_descision("What generic Traffic ID should End_Station " + \
+                                                      "(ID: "+str(node_id)+")"+" get?", traffic_ids)
+            if g_node_id_dict[node_id].set_traffic_rules(g_generic_traffics_dict[t_id])  == 0:
+                return 0  # if failure
+
+    return 1
 
 
 
@@ -1913,22 +2067,11 @@ if bullk_parse(network_topo_file, queue_definition_file, GCL_file, traffic_defin
 print()
 
 
-## Set up end stations
-# display traffic types, id and destination
-print("Available Traffic types from the Traffic Definition File and their ID:")
-print([("ID: "+str(key_id), "Type: "+str(g_generic_traffics_dict[key_id]["type"]), \
-        "Dest: "+str(g_generic_traffics_dict[key_id]["destination_id"])) \
-       for key_id in g_generic_traffics_dict])
-
-# ask user which end station gets which traffic ruleset
-traffic_ids = [id for id in g_generic_traffics_dict]  # get list of just the ID
+## Get list of ES and Switch IDs
 es_ids = []
 switch_ids = []
 for node_id in g_node_id_dict:
     if g_node_id_dict[node_id].node_type == "End_Station":  # get end station from global id list
-        t_id = gen_utils.get_restricted_descision("What generic Traffic ID should End_Station (ID: "+str(node_id)+")"+" get?", traffic_ids)
-        if g_node_id_dict[node_id].set_traffic_rules(g_generic_traffics_dict[t_id])  == 0:
-            exit()  # if failure
         es_ids.append(node_id)
     else:
         switch_ids.append(node_id)  # if not ES then node is Switch
@@ -1936,22 +2079,21 @@ for node_id in g_node_id_dict:
 
 ## Begin Simulator
 # timestamp initialised at 0 at top of file
-max_timestamp = 190  # debug
-#max_timestamp = gen_utils.get_int_descision("How many ticks should the simulator run for?", 0)
+max_timestamp = 28  # debug
+max_timestamp = gen_utils.get_int_descision("How many ticks should the simulator run for?", 0)
 
 for tick in range(1, max_timestamp):
 
     # first set GCL to timestamp
     if g_timestamp in g_offline_GCL:  # if time is present, update state, else we are in a range so leave it
         # TODO : somehow incorperate active GCL into this unless that is just for emergency queue
-
         g_current_GCL_state = g_offline_GCL[g_timestamp]  # change state
 
         # if we have reached the bottom of the GCL, start again from the top
         if g_current_GCL_state == "REPEAT":
             new_gcl = {}
-            for timestamp in g_offline_GCL:  # create new keys of now + original_GCL_entry, to simulate restart of list
-                new_gcl[int(timestamp)+int(g_timestamp)] = g_offline_GCL[timestamp]
+            for timestamp in g_original_GCL:  # create new keys of now + original_GCL_entry, to simulate restart of list
+                new_gcl[int(timestamp)+int(g_timestamp)] = g_original_GCL[timestamp]
 
             # make this new gcl the official g_offline_GCL to preserve the g_timestamp
             g_offline_GCL = new_gcl
@@ -1986,6 +2128,7 @@ for tick in range(1, max_timestamp):
 
 ## Output
 # TODO : send these to a file, maybe display a graph, get some useful metrics
+print()
 print()
 print("OUTPUTS:")
 print()
