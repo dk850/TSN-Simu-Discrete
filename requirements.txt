@@ -1,10 +1,11 @@
-# for generators
-string
+# standard library
+#math
+#string
+#random
 
 # for simulator
 pathlib
-random
-math
 
 # shared
 lxml
+

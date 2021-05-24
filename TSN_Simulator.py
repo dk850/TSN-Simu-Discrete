@@ -20,6 +20,7 @@ import crude_topo_generator as network_topo_gen  # network topology generator
 import crude_queue_def_generator as queue_def_gen  # queue definition generator
 import crude_traffic_def_generator as traffic_def_gen  # traffic definition generator
 # GCL should be made manually ahdering to standards in the UML diagrams -> T(digit){-T(digit)} (8-bits)
+# Traffic Rules -> ES mapping is an optional file and if not provided the simulator asks for its own paramerters
 
 # global variables
 g_timestamp = 0
@@ -772,11 +773,6 @@ class Controller(Switch):
     def __init__(self, id, name="unnamed"):
         super().__init__(id, name)
         self.routing_table = -1  # the entire routing table is stored in this object as a dict
-
-
-    def monitor_traffic(self):
-        # every time anything passes through this switch we get stats from it here. Called every time
-        pass
 
 
     def send_control(self, packet):

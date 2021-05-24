@@ -47,7 +47,7 @@ class Generator():
 
     def __init__(self, filename, max_nodes, naming_mode):
 
-        # setup 'globlal' variables
+        # setup object variables
         self.MAX_NODES = max_nodes
         self.naming_mode = naming_mode
         self.node_count = 0
