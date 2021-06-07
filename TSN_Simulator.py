@@ -47,7 +47,7 @@ SIM_DEBUG = 1  # debug for simulator to see timestamps
 
 # global enums
 e_es_types = ["sensor", "control"]  # possible end station types?
-e_queue_schedules = ["FIFO"]  # possible queue schedules
+e_queue_schedules = ["FIFO", "EDF"]  # possible queue schedules
 e_queue_type_names = ["ST", "Emergency", "Sporadic_Hard", "Sporadic_Soft", "BE"]  # possible queue types
 
 
@@ -73,7 +73,7 @@ traffic_mapping_file    = files_directory+using+"_traffic_mapping.txt"
 SENDING_SIZE_CAPCITY = 16  # size (in bytes) of frames able to be sent in 1 tick
 BE_FIRE_CHANCE = 0.01  # 1% chance to fire best effort queue
 SPORADIC_FIRE_CHANCE = 0.1  # 10% chance to fire both sporadic queues when possible
-EMERGENCY_QUEUE_CHANCE = 0.05  # 5% chance an ST packet will go into the emergency queue
+EMERGENCY_QUEUE_CHANCE = 0.00  # 5% chance an ST packet will go into the emergency queue
 
 
 
@@ -224,7 +224,7 @@ class End_Station(Node):
                 failed = True
 
 
-            if SIM_DEBUG:  # for debug
+            if SIM_DEBUG and not failed:  # for debug
                 print("[T", str(g_timestamp).zfill(3)+"]", "Digested", str(packet.type), "packet", \
                       "\""+str(packet.name)+"\"", "from source ES", "\""+str(packet.source)+"\"", \
                       "at final destination ES", "\""+str(self.id)+"\"", "with latency", \
@@ -234,6 +234,7 @@ class End_Station(Node):
 
 
         if failed:
+            exit()
             return 0
         else:
             return 1
@@ -532,11 +533,10 @@ class Switch(Node):
                 if len(self.ST_queue[i]) != 0:  # if queue isnt empty
                     self.available_packets.append((i, FIFO_schedule(self.ST_queue[i])))  # add (queue_number, packet) to available packet list
 
-            # NOTE : EDF would be used here like so:
-            # # EDF
-            # if self.queue_definition.ST_schedule == e_queue_schedules[1]:  # note the 1 here to signify "EDF" if the e_queue_schedules was ["FIFO", "EDF", ...]
-            #     if len(self.ST_queue[i]) != 0:  # if queue isnt empty
-            #         self.available_packets.append((i, EDF_schedule(self.ST_queue[i])))  # add queue number, and packet to available packet list
+            # EDF
+            if self.queue_definition.ST_schedule == e_queue_schedules[1]:  # note the 1 here to signify "EDF" if the e_queue_schedules was ["FIFO", "EDF", ...]
+                if len(self.ST_queue[i]) != 0:  # if queue isnt empty
+                    self.available_packets.append((i, EDF_schedule(self.ST_queue[i])))
 
             # DEBUG
             if SIM_DEBUG:
@@ -558,7 +558,12 @@ class Switch(Node):
             if self.queue_definition.emergency_schedule == e_queue_schedules[0]:
                 if len(self.EM_queue[i]) != 0:  # if queue isnt empty
                     self.available_packets.append((i, FIFO_schedule(self.EM_queue[i]), 1))  # add (queue_number, packet, EMERGENCY_FLAG) to available packet list
-                    # NOTE : this tuple is len 3 to show later that the ST traffic is in the Emergency Queue
+                    # NOTE : these tuples should be len 3 to show later that the ST traffic is in the Emergency Queue
+
+            # EDF
+            if self.queue_definition.emergency_schedule == e_queue_schedules[1]:
+                if len(self.EM_queue[i]) != 0:  # if queue isnt empty
+                    self.available_packets.append((i, EDF_schedule(self.EM_queue[i]), 1))  # add queue number, and packet to available packet list
 
             # DEBUG
             if SIM_DEBUG:
@@ -579,6 +584,11 @@ class Switch(Node):
             if self.queue_definition.sporadic_hard_schedule == e_queue_schedules[0]:
                 if len(self.SH_queue[i]) != 0:  # if queue isnt empty
                     self.available_packets.append((i, FIFO_schedule(self.SH_queue[i])))  # add (queue_number, packet) to available packet list
+
+            # EDF
+            if self.queue_definition.sporadic_hard_schedule == e_queue_schedules[1]:
+                if len(self.SH_queue[i]) != 0:  # if queue isnt empty
+                    self.available_packets.append((i, EDF_schedule(self.SH_queue[i])))  # add queue number, and packet to available packet list
 
             # DEBUG
             if SIM_DEBUG:
@@ -601,6 +611,11 @@ class Switch(Node):
                 if len(self.SS_queue[i]) != 0:  # if queue isnt empty
                     self.available_packets.append((i, FIFO_schedule(self.SS_queue[i])))  # add (queue_number, packet) to available packet list
 
+            # EDF
+            if self.queue_definition.sporadic_soft_schedule == e_queue_schedules[1]:
+                if len(self.SS_queue[i]) != 0:  # if queue isnt empty
+                    self.available_packets.append((i, EDF_schedule(self.SS_queue[i])))  # add queue number, and packet to available packet list
+
             # DEBUG
             if SIM_DEBUG:
                 if len(self.SS_queue[i]) != 0:
@@ -621,6 +636,11 @@ class Switch(Node):
             if self.queue_definition.BE_schedule == e_queue_schedules[0]:
                 if len(self.BE_queue[i]) != 0:  # if queue isnt empty
                     self.available_packets.append((i, FIFO_schedule(self.BE_queue[i])))  # add (queue_number, packet) to available packet list
+
+            # EDF
+            if self.queue_definition.BE_schedule == e_queue_schedules[1]:
+                if len(self.BE_queue[i]) != 0:  # if queue isnt empty
+                    self.available_packets.append((i, EDF_schedule(self.BE_queue[i])))  # add queue number, and packet to available packet list
 
             # DEBUG
             if SIM_DEBUG:  # for debug
@@ -1411,7 +1431,7 @@ def parse_GCL(f_GCL):
     with f_GCL.open() as f:
         f_lines = f.read().splitlines()  # put entire file into an ordered list
 
-        if( (f_lines[0][0:3] != "T0 ") and (f_lines[0][0:3] != "T0-T") ):  # first line should be T0
+        if( (f_lines[0][0:3] != "T0 ") and (f_lines[0][0:4] != "T0-T") ):  # first line should be T0
             print("ERROR: First line in GCL must start at timestamp T0")
             return 0
         if( (f_lines[-1][-7:] != " REPEAT") and (f_lines[-1][-7:] != " repeat") ):  # last line should contain REPEAT statement
@@ -2018,12 +2038,11 @@ def FIFO_schedule(queue):
 
 
 # EDF
-# NOTE : (untested, use as example)
 def EDF_schedule(queue):
     packet_to_send = -1
     earliest_deadline = 9999999999  # big number to compare against
 
-    # check each packed for shortest relative deadline
+    # check each packet for shortest relative deadline
     for packet in queue:
         if( (packet.__class__.__name__ == "ST") or (packet.__class__.__name__ == "Sporadic_Hard") ):  # ST, Emergency, and SH use hard_deadline
             deadline = packet.hard_deadline
@@ -2034,7 +2053,7 @@ def EDF_schedule(queue):
                 earliest_deadline = difference
 
         elif packet.__class__.__name__ == "Sporadic_Soft":  # SS use soft_deadline
-            deadline = packet.soft_deadline  # since this is soft_deadline it should have some sort of buffer amount of time like 20 ticks or something
+            deadline = packet.soft_deadline
             transmission = packet.transmission_time
             difference = (transmission+deadline) - g_timestamp
             if difference < earliest_deadline:
@@ -2043,7 +2062,6 @@ def EDF_schedule(queue):
 
         else:  # BE -> no deadline
             if packet_to_send == -1:  # if we havent got a packet yet, use first BE packet - acts as a FIFO for the BE queue
-                # FIFO or should this be the packet that has been in the queue the longest? Transmitted first? Oldest packet?
                 packet_to_send = packet
 
     return packet_to_send
@@ -2077,8 +2095,8 @@ for node_id in g_node_id_dict:
 
 ## Begin Simulator
 # timestamp initialised at 0 at top of file
-max_timestamp = 28  # debug
-max_timestamp = gen_utils.get_int_descision("How many ticks should the simulator run for?", 0)
+max_timestamp = 750  # debug
+#max_timestamp = gen_utils.get_int_descision("How many ticks should the simulator run for?", 0)
 
 for tick in range(1, max_timestamp):
 
@@ -2137,12 +2155,11 @@ print()
 print("Packet Latencies:\n ", g_packet_latencies)
 print("Average="+str(sum(g_packet_latencies)/len(g_packet_latencies)))
 print()
+print("Global packet queueing delays:\n ", g_queueing_delays)
 print("Average Queue Delays per Switch:")
 for sw in switch_ids:
     print("SW ID:", sw, "average packet queueing delay:", g_node_id_dict[sw].average_queue_delay)
-print()
-print("Global packet queueing delays:")
-print(g_queueing_delays)
+
 
 
 
