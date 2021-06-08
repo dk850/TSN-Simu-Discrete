@@ -22,6 +22,8 @@ import crude_traffic_def_generator as traffic_def_gen  # traffic definition gene
 # GCL should be made manually ahdering to standards in the UML diagrams -> T(digit){-T(digit)} (8-bits)
 # Traffic Rules -> ES mapping is an optional file and if not provided the simulator asks for its own paramerters
 
+random.seed(10)  # for consistent experementation
+
 # global variables
 g_timestamp = 0
 g_generic_traffics_dict = {}  # dictionary of generic traffic rules from file - key is ID
@@ -43,7 +45,7 @@ g_queueing_delays = []
 # global variables to set
 MAX_NODE_COUNT = 100
 MAX_TRAFFIC_COUNT = 1000
-SIM_DEBUG = 1  # debug for simulator to see timestamps
+SIM_DEBUG = 0  # debug for simulator to see timestamps
 
 # global enums
 e_es_types = ["sensor", "control"]  # possible end station types?
@@ -61,6 +63,7 @@ traffic_mapping_file = ""
 # manually specify
 using = "example"
 using = "M"
+using = "exp1"
 files_directory         = "simulator_files\\"
 network_topo_file       = files_directory+using+"_network_topology.xml"
 queue_definition_file   = files_directory+using+"_queue_definition.xml"
@@ -1559,7 +1562,7 @@ def parse_traffic_definition(f_traffic_def, debug=0):
 
         # build dict entry
         traffic_type = {}
-        traffic_type["offset"] = int(child.get("offset"))
+        traffic_type["offset"] = float(child.get("offset"))
         traffic_type["name"] = str(child.get("name"))
         traffic_type["destination_id"] = str(child.get("destination_id"))
         traffic_type["size"] = str(child.get("size"))
@@ -1711,8 +1714,8 @@ def parse_traffic_mapping_file(f_traffic_mapping):
                 return 0
 
             # put into easy to read variables
-            tr = int(mapping[0])
-            es = int(mapping[1])
+            es = int(mapping[0])
+            tr = int(mapping[1])
 
             if es not in topo_es_ids:  # make sure ES ID in rule is valid
                 print("ERROR: ES ID in traffic mapping rule", "\""+str(rule)+"\"", "is invalid and does not match Network Topology")
@@ -2095,7 +2098,7 @@ for node_id in g_node_id_dict:
 
 ## Begin Simulator
 # timestamp initialised at 0 at top of file
-max_timestamp = 750  # debug
+max_timestamp = 2000  # debug
 #max_timestamp = gen_utils.get_int_descision("How many ticks should the simulator run for?", 0)
 
 for tick in range(1, max_timestamp):
@@ -2139,27 +2142,42 @@ for tick in range(1, max_timestamp):
 
 
     g_timestamp += 1
-    # print()
+
 
 
 ## Output
-# TODO : send these to a file, maybe display a graph, get some useful metrics
+
+# formatting
 print()
 print()
+
+# display some useful metrics
+print("ES Count:", len(es_ids))
+print("SW Count:", len(switch_ids))
+print()
+
+# print actual output values
 print("OUTPUTS:")
 print()
+
+# print packets transmitted per switch
 print("Packets transmitted per Switch:")
 for sw in switch_ids:
     print("SW ID:", sw, "packets transmitted:", g_node_id_dict[sw].packets_transmitted)
 print()
-print("Packet Latencies:\n ", g_packet_latencies)
-print("Average="+str(sum(g_packet_latencies)/len(g_packet_latencies)))
+
+# print packet latencies
+if SIM_DEBUG:
+    print("Packet Latencies:\n ", g_packet_latencies)  # if in debug, print individual latencies
+print("Average Packet Latencies = "+str(sum(g_packet_latencies)/len(g_packet_latencies)))
 print()
-print("Global packet queueing delays:\n ", g_queueing_delays)
+
+# print packet queueing delays
+if SIM_DEBUG:
+    print("Global packet queueing delays:\n ", g_queueing_delays)  # if in debug, print individual queueing delays
 print("Average Queue Delays per Switch:")
 for sw in switch_ids:
     print("SW ID:", sw, "average packet queueing delay:", g_node_id_dict[sw].average_queue_delay)
-
 
 
 

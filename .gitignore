@@ -8,3 +8,4 @@ __pycache__
 
 # Ignore test work
 M_*
+exp*

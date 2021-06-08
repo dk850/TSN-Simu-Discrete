@@ -23,7 +23,7 @@ def generate(filename, allow_naming=True, allow_offset=True, allow_dest=True, al
 
     # if allow_naming allowed (Default), ask the user if they want to name their nodes
     if allow_naming:
-        node_name_mode = gen_utils.get_YesNo_descision("Do you wish to name your nodes? (Else they will default to \"unnamed\")")
+        node_name_mode = gen_utils.get_YesNo_descision("Do you wish to name your traffic definitions? (Else they will default to \"unnamed\")")
     else:
         node_name_mode = False
 
@@ -44,7 +44,7 @@ def generate(filename, allow_naming=True, allow_offset=True, allow_dest=True, al
     # if allow_size allowed (Default), ask the user if they want to be able to individually set packet size
     if allow_size:
         size_set_mode = gen_utils.get_YesNo_descision("Do you wish to be able to set the packet size of any Traffics about to be defined?"\
-                                                      + " (Else it will default to 16 Bytes and able to be sent in 1 tick)")
+                                                      + " (Else it will default to 16 Bytes)")
     else:
         size_set_mode = False
 
@@ -93,14 +93,14 @@ class Generator():
             # if we are naming them set that here
             if node_name_mode:
                 traffic_name = str(gen_utils.get_str_descision("Input name for Traffic Definition " + \
-                                                               str(traffic_id), alnum_only=True))
+                                                               str(traffic_id)+":", alnum_only=True))
             else:
                 traffic_name = "unnamed"  # else default to unnamed
 
             # if we are allowed to change the offsets set that here too
             if offset_set_mode:
                 traffic_offset = str(gen_utils.get_float_descision("Input offset for Traffic Definition " + \
-                                                                   str(traffic_id), 0))
+                                                                   str(traffic_id)+":", 0))
             else:
                 traffic_offset = "0"  # else default to 0
 
