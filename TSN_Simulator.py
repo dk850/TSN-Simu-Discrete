@@ -11,6 +11,7 @@ Specify file locations for neccesay files (Network Topo, Traffic Definition, GCL
 # libraries
 import random
 import math
+import csv
 from pathlib import Path
 from lxml import etree
 
@@ -33,7 +34,7 @@ g_offline_GCL = {}  # key is timestamp, value is the gate state at that timestam
 g_current_GCL_state = ""  # state of GCL shared across entire simulator, to be changed according to GCL and timestamp
 # should only change gate state if we have a key for that timestamp, else leave it as previous value
 g_packet_latencies = []  # list to store a list of every packet latency
-g_queueing_delays = []
+g_queueing_delays = []  # list to store every queueing delay
 
 
 
@@ -54,6 +55,7 @@ e_queue_type_names = ["ST", "Emergency", "Sporadic_Hard", "Sporadic_Soft", "BE"]
 
 
 # specify file paths and names. These stay blank and if none provided the simulator asks the user to generate
+using = ""
 network_topo_file = ""
 queue_definition_file = ""
 GCL_file = ""
@@ -63,10 +65,11 @@ traffic_mapping_file = ""
 # manually specify
 using = "example"
 using = "M"
-using = "exp1"
+using = "exp3"
+experiment_type = "_EDF"
 files_directory         = "simulator_files\\"
 network_topo_file       = files_directory+using+"_network_topology.xml"
-queue_definition_file   = files_directory+using+"_queue_definition.xml"
+queue_definition_file   = files_directory+using+experiment_type+"_queue_definition.xml"
 GCL_file                = files_directory+using+"_gcl.txt"
 traffic_definition_file = files_directory+using+"_traffic_definition.xml"
 traffic_mapping_file    = files_directory+using+"_traffic_mapping.txt"
@@ -2178,6 +2181,32 @@ if SIM_DEBUG:
 print("Average Queue Delays per Switch:")
 for sw in switch_ids:
     print("SW ID:", sw, "average packet queueing delay:", g_node_id_dict[sw].average_queue_delay)
+
+
+## export to file
+# latencies
+latencies_file = open(files_directory+using+"_out_packet_latencies"+experiment_type+".csv", "w", newline='')
+writer_l = csv.writer(latencies_file)
+writer_l.writerow(["Packet_Latency_(Ticks)"])  # heading
+for latency in g_packet_latencies:
+    writer_l.writerow([latency])
+latencies_file.close()
+
+# queueing delays
+queueing_file = open(files_directory+using+"_out_queueing_delays"+experiment_type+".csv", "w", newline='')
+writer_q = csv.writer(queueing_file)
+writer_q.writerow(["Queueing_Delay_(Ticks)"])  # heading
+for latency in g_packet_latencies:
+    writer_q.writerow([latency])
+queueing_file.close()
+
+# average delays per switch
+avg_queueing_file = open(files_directory+using+"_out_average_queueing_delays"+experiment_type+".csv", "w", newline='')
+writer_aq = csv.writer(avg_queueing_file)
+writer_aq.writerow(["Switch_(ID)", "Average_Queueing_Delay_(Ticks)"])  # headings
+for sw in switch_ids:
+    writer_aq.writerow([sw, g_node_id_dict[sw].average_queue_delay])
+avg_queueing_file.close()
 
 
 
