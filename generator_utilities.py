@@ -1,11 +1,16 @@
 """
-Contains functions that are re-used accros all generators. Mainly used to gather user inputs
+Contains functions that are re-used accros all generators and simulator
+
+Mainly used to gather user inputs
 """
+
 ##################################################
 ##################### IMPORT #####################
 ##################################################
 
 import string
+
+
 
 
 ##################################################

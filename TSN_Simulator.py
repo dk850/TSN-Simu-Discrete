@@ -65,11 +65,10 @@ traffic_mapping_file = ""
 # manually specify
 using = "example"
 using = "M"
-using = "exp3"
-experiment_type = "_EDF"
+using = "exp1"
 files_directory         = "simulator_files\\"
 network_topo_file       = files_directory+using+"_network_topology.xml"
-queue_definition_file   = files_directory+using+experiment_type+"_queue_definition.xml"
+queue_definition_file   = files_directory+using+"_queue_definition.xml"
 GCL_file                = files_directory+using+"_gcl.txt"
 traffic_definition_file = files_directory+using+"_traffic_definition.xml"
 traffic_mapping_file    = files_directory+using+"_traffic_mapping.txt"
@@ -77,8 +76,8 @@ traffic_mapping_file    = files_directory+using+"_traffic_mapping.txt"
 
 # generator parameters
 SENDING_SIZE_CAPCITY = 16  # size (in bytes) of frames able to be sent in 1 tick
-BE_FIRE_CHANCE = 0.01  # 1% chance to fire best effort queue
-SPORADIC_FIRE_CHANCE = 0.1  # 10% chance to fire both sporadic queues when possible
+BE_FIRE_CHANCE = 10 # 1% chance to fire best effort queue
+SPORADIC_FIRE_CHANCE = 0  # 10% chance to fire both sporadic queues when possible
 EMERGENCY_QUEUE_CHANCE = 0.00  # 5% chance an ST packet will go into the emergency queue
 
 
@@ -671,9 +670,7 @@ class Switch(Node):
         if self.busy != 0:  # if we are still sending a packet
             self.busy -= 1
 
-        if self.busy == 0:  # if the packet is now fully sent, can continue
-            pass
-        else:
+        if self.busy != 0:  # if the packet is now fully sent, can continue
             return 0  # else we cant send a packet
 
         # find highest priority packet out of all packets available to be sent
@@ -698,7 +695,7 @@ class Switch(Node):
             self.SH_queue[queue_number].remove(packet_to_send[1])
         elif queue_type == "Sporadic_Soft":
             self.SS_queue[queue_number].remove(packet_to_send[1])
-        elif queue_type == "Best_Effort":
+        elif queue_type == "BE":
             self.BE_queue[queue_number].remove(packet_to_send[1])
 
         return 1
@@ -2101,7 +2098,7 @@ for node_id in g_node_id_dict:
 
 ## Begin Simulator
 # timestamp initialised at 0 at top of file
-max_timestamp = 2000  # debug
+max_timestamp = 20000  # debug
 #max_timestamp = gen_utils.get_int_descision("How many ticks should the simulator run for?", 0)
 
 for tick in range(1, max_timestamp):
@@ -2183,9 +2180,10 @@ for sw in switch_ids:
     print("SW ID:", sw, "average packet queueing delay:", g_node_id_dict[sw].average_queue_delay)
 
 
+
 ## export to file
 # latencies
-latencies_file = open(files_directory+using+"_out_packet_latencies"+experiment_type+".csv", "w", newline='')
+latencies_file = open(files_directory+using+"_out_packet_latencies.csv", "w", newline='')
 writer_l = csv.writer(latencies_file)
 writer_l.writerow(["Packet_Latency_(Ticks)"])  # heading
 for latency in g_packet_latencies:
@@ -2193,7 +2191,7 @@ for latency in g_packet_latencies:
 latencies_file.close()
 
 # queueing delays
-queueing_file = open(files_directory+using+"_out_queueing_delays"+experiment_type+".csv", "w", newline='')
+queueing_file = open(files_directory+using+"_out_queueing_delays.csv", "w", newline='')
 writer_q = csv.writer(queueing_file)
 writer_q.writerow(["Queueing_Delay_(Ticks)"])  # heading
 for latency in g_packet_latencies:
@@ -2201,7 +2199,7 @@ for latency in g_packet_latencies:
 queueing_file.close()
 
 # average delays per switch
-avg_queueing_file = open(files_directory+using+"_out_average_queueing_delays"+experiment_type+".csv", "w", newline='')
+avg_queueing_file = open(files_directory+using+"_out_average_queueing_delays.csv", "w", newline='')
 writer_aq = csv.writer(avg_queueing_file)
 writer_aq.writerow(["Switch_(ID)", "Average_Queueing_Delay_(Ticks)"])  # headings
 for sw in switch_ids:

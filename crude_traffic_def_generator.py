@@ -3,6 +3,7 @@ Command line interface to generate the traffic definition xml by stating everyth
 
 No visualisation
 """
+
 ##################################################
 ##################### IMPORT #####################
 ##################################################

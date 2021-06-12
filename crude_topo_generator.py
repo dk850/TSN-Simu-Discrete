@@ -3,6 +3,7 @@ Command line interface to generate the network topology xml by stating everythin
 
 No visualisation
 """
+
 ##################################################
 ##################### IMPORT #####################
 ##################################################
