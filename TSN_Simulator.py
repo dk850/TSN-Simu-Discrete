@@ -23,8 +23,6 @@ import crude_traffic_def_generator as traffic_def_gen  # traffic definition gene
 # GCL should be made manually ahdering to standards in the UML diagrams -> T(digit){-T(digit)} (8-bits)
 # Traffic Rules -> ES mapping is an optional file and if not provided the simulator asks for its own paramerters
 
-random.seed(10)  # for consistent experementation
-
 # global variables
 g_timestamp = 0
 g_generic_traffics_dict = {}  # dictionary of generic traffic rules from file - key is ID
@@ -43,42 +41,45 @@ g_queueing_delays = []  # list to store every queueing delay
 ################# USER  SETTINGS #################
 ##################################################
 
-# global variables to set
-MAX_NODE_COUNT = 100
-MAX_TRAFFIC_COUNT = 1000
-SIM_DEBUG = 0  # debug for simulator to see timestamps
-
 # global enums
 e_es_types = ["sensor", "control"]  # possible end station types?
 e_queue_schedules = ["FIFO", "EDF"]  # possible queue schedules
 e_queue_type_names = ["ST", "Emergency", "Sporadic_Hard", "Sporadic_Soft", "BE"]  # possible queue types
 
 
+# global variables to set
+MAX_NODE_COUNT = 100
+MAX_TRAFFIC_COUNT = 1000
+MAX_TIMESTAMP = 0  # debug
+SIM_DEBUG = 0  # debug for simulator to see timestamps
+# random.seed(10)  # for consistent experementation
+
+
+# generator parameters
+SENDING_SIZE_CAPCITY = 16  # size (in bytes) of frames able to be sent in 1 tick
+BE_FIRE_CHANCE = 1  # 1% chance to fire best effort queue
+SPORADIC_FIRE_CHANCE = 10  # 10% chance to fire both sporadic queues when possible
+EMERGENCY_QUEUE_CHANCE = 5  # 5% chance an ST packet will go into the emergency queue
+
+
 # specify file paths and names. These stay blank and if none provided the simulator asks the user to generate
-using = ""
+files_directory = "simulator_files\\"
+prefix = ""
 network_topo_file = ""
 queue_definition_file = ""
 GCL_file = ""
 traffic_definition_file = ""
 traffic_mapping_file = ""
 
-# manually specify
-using = "example"
-using = "M"
-using = "exp1"
-files_directory         = "simulator_files\\"
-network_topo_file       = files_directory+using+"_network_topology.xml"
-queue_definition_file   = files_directory+using+"_queue_definition.xml"
-GCL_file                = files_directory+using+"_gcl.txt"
-traffic_definition_file = files_directory+using+"_traffic_definition.xml"
-traffic_mapping_file    = files_directory+using+"_traffic_mapping.txt"
-
-
-# generator parameters
-SENDING_SIZE_CAPCITY = 16  # size (in bytes) of frames able to be sent in 1 tick
-BE_FIRE_CHANCE = 10 # 1% chance to fire best effort queue
-SPORADIC_FIRE_CHANCE = 0  # 10% chance to fire both sporadic queues when possible
-EMERGENCY_QUEUE_CHANCE = 0.00  # 5% chance an ST packet will go into the emergency queue
+# manually specify the example files here if required by uncommenting this block
+"""
+prefix = "example"
+network_topo_file       = files_directory+prefix+"_network_topology.xml"
+queue_definition_file   = files_directory+prefix+"_queue_definition.xml"
+GCL_file                = files_directory+prefix+"_gcl.txt"
+traffic_definition_file = files_directory+prefix+"_traffic_definition.xml"
+traffic_mapping_file    = files_directory+prefix+"_traffic_mapping.txt"
+"""
 
 
 
@@ -239,7 +240,7 @@ class End_Station(Node):
 
 
         if failed:
-            exit()
+            exit()  # call some recovery function here in future
             return 0
         else:
             return 1
@@ -2097,11 +2098,11 @@ for node_id in g_node_id_dict:
 
 
 ## Begin Simulator
-# timestamp initialised at 0 at top of file
-max_timestamp = 20000  # debug
-#max_timestamp = gen_utils.get_int_descision("How many ticks should the simulator run for?", 0)
+# timestamp initialised at top of file
+if MAX_TIMESTAMP == 0:
+    MAX_TIMESTAMP = gen_utils.get_int_descision("How many ticks should the simulator run for?", 0)
 
-for tick in range(1, max_timestamp):
+for tick in range(1, MAX_TIMESTAMP):
 
     # first set GCL to timestamp
     if g_timestamp in g_offline_GCL:  # if time is present, update state, else we are in a range so leave it
@@ -2183,7 +2184,7 @@ for sw in switch_ids:
 
 ## export to file
 # latencies
-latencies_file = open(files_directory+using+"_out_packet_latencies.csv", "w", newline='')
+latencies_file = open(files_directory+prefix+"_out_packet_latencies.csv", "w", newline='')
 writer_l = csv.writer(latencies_file)
 writer_l.writerow(["Packet_Latency_(Ticks)"])  # heading
 for latency in g_packet_latencies:
@@ -2191,7 +2192,7 @@ for latency in g_packet_latencies:
 latencies_file.close()
 
 # queueing delays
-queueing_file = open(files_directory+using+"_out_queueing_delays.csv", "w", newline='')
+queueing_file = open(files_directory+prefix+"_out_queueing_delays.csv", "w", newline='')
 writer_q = csv.writer(queueing_file)
 writer_q.writerow(["Queueing_Delay_(Ticks)"])  # heading
 for latency in g_packet_latencies:
@@ -2199,7 +2200,7 @@ for latency in g_packet_latencies:
 queueing_file.close()
 
 # average delays per switch
-avg_queueing_file = open(files_directory+using+"_out_average_queueing_delays.csv", "w", newline='')
+avg_queueing_file = open(files_directory+prefix+"_out_average_queueing_delays.csv", "w", newline='')
 writer_aq = csv.writer(avg_queueing_file)
 writer_aq.writerow(["Switch_(ID)", "Average_Queueing_Delay_(Ticks)"])  # headings
 for sw in switch_ids:
